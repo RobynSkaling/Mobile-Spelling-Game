@@ -14,11 +14,6 @@ A lightweight mobile spelling game concept for children aged 5 to 10, designed t
 - Content and progress stored locally on the device.
 - Focus on simple gameplay, child-friendly UX, and maintainable code structure.
 
-## Repository Contents
-- Product and UX planning documents in the docs folder.
-- Architecture and technical planning documents for the app.
-- A place to prototype and evolve the gameplay concept over time.
-
 ## Development Notes
 - The app is intended to work offline by default.
 - The initial focus is on a simple, polished core experience rather than a large feature set.

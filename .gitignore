@@ -1,0 +1,7 @@
+node_modules/
+.expo/
+dist/
+.webpack/
+*.log
+.DS_Store
+.vscode/
