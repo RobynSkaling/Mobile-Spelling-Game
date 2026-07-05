@@ -3,7 +3,7 @@
     "name": "Mama Bears Spelling Bee",
     "slug": "mama-bears-spelling-bee",
     "scheme": "mama-bears-spelling-bee",
-    "platforms": ["ios", "android"],
+    "platforms": ["ios", "android", "web"],
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": ["**/*"],
@@ -12,7 +12,6 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#F9D96B"
       }
     }
