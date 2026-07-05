@@ -4,12 +4,19 @@ import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useProfileStore } from '@/stores/profile-store';
 
-const AVATARS = ['🐻', '🦉', '🐵', '🐝'];
+const AVATARS = [
+  { label: '🐧', color: '#8E44AD' },
+  { label: '🐺', color: '#E74C3C' },
+  { label: '🦊', color: '#3498DB' },
+  { label: '🐸', color: '#F39C12' },
+  { label: '🦄', color: '#FF69B4' },
+  { label: '🦚', color: '#F1C40F' },
+];
 
 export function ProfileScreen() {
   const { profile, setProfile } = useProfileStore();
   const [name, setName] = useState(profile?.name ?? '');
-  const [avatar, setAvatar] = useState(profile?.avatar ?? AVATARS[0]);
+  const [avatar, setAvatar] = useState(profile?.avatar ?? AVATARS[0].label);
 
   const isReady = useMemo(() => name.trim().length > 0, [name]);
 
@@ -46,14 +53,16 @@ export function ProfileScreen() {
       <Text style={styles.label}>Pick an avatar</Text>
       <View style={styles.avatarRow}>
         {AVATARS.map((option) => {
-          const selected = option === avatar;
+          const selected = option.label === avatar;
           return (
             <Pressable
-              key={option}
-              onPress={() => setAvatar(option)}
+              key={option.label}
+              onPress={() => setAvatar(option.label)}
               style={[styles.avatarOption, selected && styles.avatarOptionSelected]}
             >
-              <Text style={styles.avatarEmoji}>{option}</Text>
+              <View style={[styles.avatarBadge, { backgroundColor: option.color }]}> 
+                <Text style={styles.avatarEmoji}>{option.label}</Text>
+              </View>
             </Pressable>
           );
         })}
@@ -74,10 +83,13 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: 30,
+    fontWeight: '800',
     color: theme.colors.text,
     marginBottom: theme.spacing.sm,
+    textShadowColor: '#111111',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 0,
   },
   message: {
     fontSize: 16,
@@ -93,9 +105,9 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.secondary,
-    borderRadius: 12,
+    borderWidth: 4,
+    borderColor: '#111111',
+    borderRadius: 16,
     padding: theme.spacing.sm,
     marginBottom: theme.spacing.lg,
   },
@@ -105,17 +117,29 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xl,
   },
   avatarOption: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.surface,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   avatarOptionSelected: {
-    borderColor: theme.colors.primary,
+    transform: [{ scale: 1.08 }],
+  },
+  avatarBadge: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: '#111111',
+    shadowColor: '#111111',
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 0.9,
+    shadowRadius: 0,
+    elevation: 4,
   },
   avatarEmoji: {
     fontSize: 28,
@@ -126,6 +150,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.xl,
     borderRadius: 999,
     alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#111111',
   },
   buttonDisabled: {
     opacity: 0.5,

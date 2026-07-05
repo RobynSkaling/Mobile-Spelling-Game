@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated } from 'react-native';
+import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useSessionStore } from '@/stores/session-store';
 import { useProfileStore } from '@/stores/profile-store';
@@ -102,6 +103,19 @@ export function PlayScreen() {
     setCurrentWord(WORDS[0]);
   };
 
+  const handleGoHome = () => {
+    router.replace('/home');
+  };
+
+  const handleExitApp = () => {
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.href = 'about:blank';
+      return;
+    }
+
+    router.replace('/home');
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Honey Pot Flick</Text>
@@ -149,9 +163,17 @@ export function PlayScreen() {
         </Animated.View>
       ) : null}
 
-      <Pressable style={styles.secondaryButton} onPress={handleReset}>
-        <Text style={styles.secondaryButtonText}>Reset game</Text>
-      </Pressable>
+      <View style={styles.actionsRow}>
+        <Pressable style={styles.secondaryButton} onPress={handleReset}>
+          <Text style={styles.secondaryButtonText}>Reset game</Text>
+        </Pressable>
+        <Pressable style={styles.secondaryButton} onPress={handleGoHome}>
+          <Text style={styles.secondaryButtonText}>Back home</Text>
+        </Pressable>
+        <Pressable style={styles.exitButton} onPress={handleExitApp}>
+          <Text style={styles.exitButtonText}>Exit</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -186,6 +208,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#111111',
   },
   targetLabel: {
     fontSize: 13,
@@ -203,9 +227,9 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.lg,
     padding: theme.spacing.md,
     borderRadius: 20,
-    backgroundColor: '#FFF1B8',
-    borderWidth: 1,
-    borderColor: '#E9C84B',
+    backgroundColor: '#FFE082',
+    borderWidth: 4,
+    borderColor: '#111111',
   },
   potLabel: {
     fontSize: 14,
@@ -262,9 +286,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     margin: 6,
     backgroundColor: theme.colors.secondary,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
+    borderWidth: 4,
+    borderColor: '#111111',
+    shadowColor: '#111111',
+    shadowOpacity: 0.8,
+    shadowRadius: 0,
     elevation: 2,
   },
   tileButtonText: {
@@ -292,12 +318,37 @@ const styles = StyleSheet.create({
   rewardText: {
     fontSize: 40,
   },
-  secondaryButton: {
+  actionsRow: {
     marginTop: theme.spacing.lg,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: theme.spacing.sm,
+  },
+  secondaryButton: {
     alignSelf: 'center',
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 999,
+    backgroundColor: '#FFE38A',
+    borderWidth: 3,
+    borderColor: '#111111',
   },
   secondaryButtonText: {
-    color: theme.colors.muted,
+    color: theme.colors.text,
+    fontWeight: '600',
+  },
+  exitButton: {
+    alignSelf: 'center',
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 999,
+    backgroundColor: theme.colors.accent,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  exitButtonText: {
+    color: theme.colors.surface,
     fontWeight: '600',
   },
 });
