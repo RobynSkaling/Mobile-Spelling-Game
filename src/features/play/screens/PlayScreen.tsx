@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { theme } from '@/shared/lib/theme';
 import { useSessionStore } from '@/stores/session-store';
+import { useProfileStore } from '@/stores/profile-store';
 
 const WORDS = ['apple', 'sun', 'tree', 'happy'];
 
@@ -9,6 +10,7 @@ export function PlayScreen() {
   const [guess, setGuess] = useState('');
   const [feedback, setFeedback] = useState('Type the spelling.');
   const { currentWord, setCurrentWord, incrementScore, resetScore, score } = useSessionStore();
+  const { profile } = useProfileStore();
 
   useMemo(() => {
     if (!currentWord) {
@@ -35,6 +37,9 @@ export function PlayScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Spelling Time</Text>
+      <Text style={styles.greeting}>
+        {profile ? `Hi ${profile.name}! Mama Bear is cheering for you.` : 'Mama Bear is cheering for you.'}
+      </Text>
       <Text style={styles.score}>Score: {score}</Text>
       <Text style={styles.prompt}>Spell this word:</Text>
       <Text style={styles.word}>{currentWord ?? '...'}</Text>

@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 interface Profile {
   id: string;
   name: string;
+  avatar: string;
 }
 
 interface ProfileState {

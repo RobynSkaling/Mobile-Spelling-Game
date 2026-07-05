@@ -6,11 +6,13 @@ import { theme } from '@/shared/lib/theme';
 export function HomeScreen() {
   return (
     <View style={styles.container}>
+      <Text style={styles.emoji}>🐻</Text>
       <Text style={styles.title}>Mama Bear's Spelling Bee</Text>
       <Text style={styles.subtitle}>A cheerful spelling adventure for little learners.</Text>
+      <Text style={styles.message}>Mama Bear is ready to help you spell with a smile.</Text>
 
-      <Pressable style={styles.button} onPress={() => router.push('/play')}>
-        <Text style={styles.buttonText}>Start Spelling</Text>
+      <Pressable style={styles.button} onPress={() => router.push('/profile')}>
+        <Text style={styles.buttonText}>Play</Text>
       </Pressable>
     </View>
   );
@@ -24,6 +26,10 @@ const styles = StyleSheet.create({
     padding: theme.spacing.lg,
     backgroundColor: theme.colors.background,
   },
+  emoji: {
+    fontSize: 64,
+    marginBottom: theme.spacing.md,
+  },
   title: {
     fontSize: 30,
     fontWeight: '700',
@@ -34,6 +40,12 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: theme.colors.muted,
+    textAlign: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+  message: {
+    fontSize: 15,
+    color: theme.colors.text,
     textAlign: 'center',
     marginBottom: theme.spacing.xl,
   },
