@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, Easing } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useSessionStore } from '@/stores/session-store';
 import { useProfileStore } from '@/stores/profile-store';
+import { useWordListStore } from '@/stores/word-list-store';
 import {
   Bounds,
   Point,
@@ -17,7 +18,6 @@ import {
   toContainerRelative,
 } from '@/features/play/logic/honey-pot-flick';
 
-const WORDS = ['apple', 'sun', 'tree', 'happy'];
 const GHOST_HALF = 28;
 const THROW_DURATION_MS = 260;
 const BLINK_INTERVAL_MS = 110;
@@ -46,10 +46,19 @@ export function PlayScreen() {
 
   const { currentWord, setCurrentWord, incrementScore, resetScore, score } = useSessionStore();
   const { profile } = useProfileStore();
+  const selectedList = useWordListStore((state) => state.getSelectedList());
+  const words = useMemo(() => selectedList?.words ?? [], [selectedList]);
 
   useEffect(() => {
-    if (!currentWord) {
-      setCurrentWord(WORDS[0]);
+    if (words.length === 0) {
+      return;
+    }
+    setCurrentWord(words[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedList?.id]);
+
+  useEffect(() => {
+    if (!currentWord || words.length === 0) {
       return;
     }
 
@@ -155,7 +164,7 @@ export function PlayScreen() {
       triggerCelebration();
       setFeedback('Perfect! The whole word is spelled.');
       setTimeout(() => {
-        setCurrentWord(getNextWord(WORDS, currentWord));
+        setCurrentWord(getNextWord(words, currentWord));
       }, 900);
       return;
     }
@@ -229,7 +238,9 @@ export function PlayScreen() {
 
   const handleReset = () => {
     resetScore();
-    setCurrentWord(WORDS[0]);
+    if (words.length > 0) {
+      setCurrentWord(words[0]);
+    }
   };
 
   const handleGoHome = () => {
@@ -259,105 +270,120 @@ export function PlayScreen() {
       <Text style={styles.greeting}>
         {profile ? `Hi ${profile.name}! Mama Bear is cheering for you.` : 'Mama Bear is cheering for you.'}
       </Text>
+      {selectedList ? <Text style={styles.listName}>List: {selectedList.name}</Text> : null}
       <Text style={styles.score}>Score {score}</Text>
 
-      <View style={styles.targetCard}>
-        <Text style={styles.targetLabel}>Spell this word</Text>
-        <Text testID="target-word" style={styles.word}>{currentWord?.toUpperCase() ?? ''}</Text>
-      </View>
-
-      <View style={styles.answerRow}>
-        {guess.split('').map((letter, index) => (
-          <View key={`${letter}-${index}`} style={styles.answerTile}>
-            <Text style={styles.answerTileText}>{letter.toUpperCase()}</Text>
+      {words.length === 0 ? (
+        <View style={styles.emptyListCard}>
+          <Text style={styles.emptyListText}>This list doesn't have any words yet.</Text>
+          <Pressable style={styles.secondaryButton} onPress={() => router.push('/lists')}>
+            <Text style={styles.secondaryButtonText}>Add words or pick another list</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <>
+          <View style={styles.targetCard}>
+            <Text style={styles.targetLabel}>Spell this word</Text>
+            <Text testID="target-word" style={styles.word}>{currentWord?.toUpperCase() ?? ''}</Text>
           </View>
-        ))}
-        {guess.length < (currentWord?.length ?? 0) && (
-          <View style={styles.answerSlot}>
-            <Text style={styles.answerSlotText}>?</Text>
-          </View>
-        )}
-      </View>
 
-      <Text style={styles.fieldLabel}>Flick a letter into the honey pot</Text>
-      <View ref={fieldRef} style={styles.field} onLayout={measureField}>
-        {potVisible && potCenter && fieldBounds ? (
-          <View
-            testID="honey-pot"
+          <View style={styles.answerRow}>
+            {guess.split('').map((letter, index) => (
+              <View key={`${letter}-${index}`} style={styles.answerTile}>
+                <Text style={styles.answerTileText}>{letter.toUpperCase()}</Text>
+              </View>
+            ))}
+            {guess.length < (currentWord?.length ?? 0) && (
+              <View style={styles.answerSlot}>
+                <Text style={styles.answerSlotText}>?</Text>
+              </View>
+            )}
+          </View>
+
+          <Text style={styles.fieldLabel}>Flick a letter into the honey pot</Text>
+          <View ref={fieldRef} style={styles.field} onLayout={measureField}>
+            {potVisible && potCenter && fieldBounds ? (
+              <View
+                testID="honey-pot"
+                style={[
+                  styles.pot,
+                  potBlink && styles.potBlinkOn,
+                  {
+                    left: potCenter.x - fieldBounds.x - POT_SIZE / 2,
+                    top: potCenter.y - fieldBounds.y - POT_SIZE / 2,
+                  },
+                ]}
+              >
+                <Text style={styles.potEmoji}>🍯</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.tileGrid}>
+            {availableLetters.map((letter, index) => {
+              const pan = Gesture.Pan()
+                .runOnJS(true)
+                .onStart((event) => handleFlickBegin(letter, index, event.absoluteX, event.absoluteY))
+                .onUpdate((event) => handleFlickUpdate(event.absoluteX, event.absoluteY))
+                .onFinalize((event) =>
+                  handleFlickEnd(letter, index, event.absoluteX, event.absoluteY, event.velocityX, event.velocityY),
+                );
+
+              // The tile being flicked stays mounted (never swapped for a different element) so the
+              // native gesture recognizer isn't torn down mid-gesture. It's just hidden visually.
+              return (
+                <GestureDetector key={`${letter}-${index}`} gesture={pan}>
+                  <View style={[styles.tileButton, activeIndex === index && styles.tileButtonHidden]}>
+                    <Text style={styles.tileButtonText}>{letter.toUpperCase()}</Text>
+                  </View>
+                </GestureDetector>
+              );
+            })}
+          </View>
+
+          {activeLetter ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.dragGhost,
+                {
+                  transform: [
+                    { translateX: Animated.subtract(ghostAnim.x, GHOST_HALF) },
+                    { translateY: Animated.subtract(ghostAnim.y, GHOST_HALF) },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.dragGhostText}>{activeLetter.toUpperCase()}</Text>
+            </Animated.View>
+          ) : null}
+
+          <Text
+            testID="flick-feedback"
             style={[
-              styles.pot,
-              potBlink && styles.potBlinkOn,
-              {
-                left: potCenter.x - fieldBounds.x - POT_SIZE / 2,
-                top: potCenter.y - fieldBounds.y - POT_SIZE / 2,
-              },
+              styles.feedback,
+              feedback.includes('Oops') || feedback.includes('Off target') || feedback.includes('harder')
+                ? styles.feedbackError
+                : styles.feedbackSuccess,
             ]}
           >
-            <Text style={styles.potEmoji}>🍯</Text>
-          </View>
-        ) : null}
-      </View>
+            {feedback}
+          </Text>
 
-      <View style={styles.tileGrid}>
-        {availableLetters.map((letter, index) => {
-          const pan = Gesture.Pan()
-            .runOnJS(true)
-            .onStart((event) => handleFlickBegin(letter, index, event.absoluteX, event.absoluteY))
-            .onUpdate((event) => handleFlickUpdate(event.absoluteX, event.absoluteY))
-            .onFinalize((event) =>
-              handleFlickEnd(letter, index, event.absoluteX, event.absoluteY, event.velocityX, event.velocityY),
-            );
-
-          // The tile being flicked stays mounted (never swapped for a different element) so the
-          // native gesture recognizer isn't torn down mid-gesture. It's just hidden visually.
-          return (
-            <GestureDetector key={`${letter}-${index}`} gesture={pan}>
-              <View style={[styles.tileButton, activeIndex === index && styles.tileButtonHidden]}>
-                <Text style={styles.tileButtonText}>{letter.toUpperCase()}</Text>
-              </View>
-            </GestureDetector>
-          );
-        })}
-      </View>
-
-      {activeLetter ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.dragGhost,
-            {
-              transform: [
-                { translateX: Animated.subtract(ghostAnim.x, GHOST_HALF) },
-                { translateY: Animated.subtract(ghostAnim.y, GHOST_HALF) },
-              ],
-            },
-          ]}
-        >
-          <Text style={styles.dragGhostText}>{activeLetter.toUpperCase()}</Text>
-        </Animated.View>
-      ) : null}
-
-      <Text
-        testID="flick-feedback"
-        style={[
-          styles.feedback,
-          feedback.includes('Oops') || feedback.includes('Off target') || feedback.includes('harder')
-            ? styles.feedbackError
-            : styles.feedbackSuccess,
-        ]}
-      >
-        {feedback}
-      </Text>
-
-      {celebrating ? (
-        <Animated.View style={[styles.rewardBadge, { transform: [{ scale: rewardScale }] }]}>
-          <Text style={styles.rewardText}>🍯</Text>
-        </Animated.View>
-      ) : null}
+          {celebrating ? (
+            <Animated.View style={[styles.rewardBadge, { transform: [{ scale: rewardScale }] }]}>
+              <Text style={styles.rewardText}>🍯</Text>
+            </Animated.View>
+          ) : null}
+        </>
+      )}
 
       <View style={styles.actionsRow}>
         <Pressable style={styles.secondaryButton} onPress={handleReset}>
           <Text style={styles.secondaryButtonText}>Reset game</Text>
+        </Pressable>
+        <Pressable style={styles.secondaryButton} onPress={() => router.push('/lists')}>
+          <Text style={styles.secondaryButtonText}>📚 Word Lists</Text>
         </Pressable>
         <Pressable style={styles.secondaryButton} onPress={handleGoHome}>
           <Text style={styles.secondaryButtonText}>Back home</Text>
@@ -387,6 +413,30 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
     color: theme.colors.muted,
     textAlign: 'center',
+  },
+  listName: {
+    marginTop: 2,
+    color: theme.colors.muted,
+    textAlign: 'center',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  emptyListCard: {
+    marginTop: theme.spacing.lg,
+    padding: theme.spacing.lg,
+    borderRadius: 20,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#111111',
+    gap: theme.spacing.sm,
+  },
+  emptyListText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.text,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xs,
   },
   score: {
     marginTop: theme.spacing.sm,

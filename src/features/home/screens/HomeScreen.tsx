@@ -3,9 +3,11 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useProfileStore } from '@/stores/profile-store';
+import { useWordListStore } from '@/stores/word-list-store';
 
 export function HomeScreen() {
   const profile = useProfileStore((state) => state.profile);
+  const selectedList = useWordListStore((state) => state.getSelectedList());
 
   const handlePlay = () => {
     router.push(profile ? '/play' : '/profile');
@@ -25,6 +27,11 @@ export function HomeScreen() {
       <Pressable style={styles.button} onPress={handlePlay}>
         <Text style={styles.buttonText}>Play</Text>
       </Pressable>
+
+      <Pressable style={styles.listsButton} onPress={() => router.push('/lists')}>
+        <Text style={styles.listsButtonText}>📚 Word Lists</Text>
+      </Pressable>
+      {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
 
       {profile ? (
         <Pressable onPress={() => router.push('/profile')}>
@@ -81,5 +88,24 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.md,
     color: theme.colors.muted,
     textDecorationLine: 'underline',
+  },
+  listsButton: {
+    marginTop: theme.spacing.md,
+    backgroundColor: theme.colors.secondary,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  listsButtonText: {
+    color: theme.colors.surface,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  selectedListLabel: {
+    marginTop: theme.spacing.sm,
+    color: theme.colors.muted,
+    fontWeight: '600',
   },
 });
