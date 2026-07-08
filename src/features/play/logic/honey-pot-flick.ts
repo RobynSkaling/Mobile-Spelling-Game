@@ -62,6 +62,23 @@ export function randomPotPosition(field: Bounds, potSize: number = POT_SIZE): Po
   };
 }
 
+/**
+ * Picks the next leg of a slow wander for a pot centered at `center`, staying within `rangePx`
+ * of its current spot while never drifting outside the field bounds.
+ */
+export function randomDriftOffset(center: Point, field: Bounds, rangePx: number, potSize: number = POT_SIZE): Point {
+  const margin = potSize / 2 + 8;
+  const minDx = Math.max(-rangePx, field.x + margin - center.x);
+  const maxDx = Math.min(rangePx, field.x + field.width - margin - center.x);
+  const minDy = Math.max(-rangePx, field.y + margin - center.y);
+  const maxDy = Math.min(rangePx, field.y + field.height - margin - center.y);
+
+  return {
+    x: minDx + Math.random() * Math.max(maxDx - minDx, 0),
+    y: minDy + Math.random() * Math.max(maxDy - minDy, 0),
+  };
+}
+
 /** Projects a straight-line throw from `origin` along the release velocity. Returns null if the flick was too weak to count. */
 export function computeThrow(origin: Point, velocity: Point): Point | null {
   const speed = Math.hypot(velocity.x, velocity.y);

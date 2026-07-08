@@ -17,6 +17,7 @@ import {
   computeThrow,
   getNextWord,
   isFlickOnTarget,
+  randomDriftOffset,
   randomPotPosition,
   toContainerRelative,
 } from '@/features/play/logic/honey-pot-flick';
@@ -56,10 +57,15 @@ export function PlayScreen() {
   const ghostAnim = useRef(new Animated.ValueXY()).current;
   const bannerOpacity = useRef(new Animated.Value(0)).current;
   const bannerScale = useRef(new Animated.Value(0.6)).current;
+  const potDriftAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<View | null>(null);
   const fieldRef = useRef<View | null>(null);
   const resolvingRef = useRef(false);
+  const fieldBoundsRef = useRef<Bounds | null>(null);
+  const potCenterRef = useRef<Point | null>(null);
+  const potDriftOffsetRef = useRef<Point>({ x: 0, y: 0 });
+  const driftActiveRef = useRef(false);
 
   const { currentWord, setCurrentWord, incrementScore, resetScore, score } = useSessionStore();
   const { profile } = useProfileStore();
@@ -67,6 +73,81 @@ export function PlayScreen() {
   const words = useMemo(() => selectedList?.words ?? [], [selectedList]);
   const gameMode = useGameModeStore((state) => state.mode);
   const modeConfig = GAME_MODE_CONFIG[gameMode];
+
+  useEffect(() => {
+    fieldBoundsRef.current = fieldBounds;
+  }, [fieldBounds]);
+
+  useEffect(() => {
+    potCenterRef.current = potCenter;
+  }, [potCenter]);
+
+  useEffect(() => {
+    const id = potDriftAnim.addListener((value) => {
+      potDriftOffsetRef.current = value;
+    });
+    return () => potDriftAnim.removeListener(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const wanderPotStep = () => {
+    if (!driftActiveRef.current) {
+      return;
+    }
+
+    const field = fieldBoundsRef.current;
+    const center = potCenterRef.current;
+
+    if (!field || !center) {
+      setTimeout(wanderPotStep, 200);
+      return;
+    }
+
+    const target = randomDriftOffset(center, field, modeConfig.potDriftRangePx);
+
+    Animated.timing(potDriftAnim, {
+      toValue: target,
+      duration: modeConfig.potDriftLegMs,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        wanderPotStep();
+      }
+    });
+  };
+
+  const startPotDrift = () => {
+    if (driftActiveRef.current) {
+      return;
+    }
+    driftActiveRef.current = true;
+    wanderPotStep();
+  };
+
+  const stopPotDrift = () => {
+    driftActiveRef.current = false;
+    potDriftAnim.stopAnimation();
+    Animated.timing(potDriftAnim, { toValue: { x: 0, y: 0 }, duration: 220, useNativeDriver: true }).start();
+  };
+
+  useEffect(() => {
+    if (modeConfig.potDriftEnabled && potVisible && words.length > 0) {
+      startPotDrift();
+    } else {
+      stopPotDrift();
+    }
+
+    return () => stopPotDrift();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeConfig.potDriftEnabled, potVisible, words.length]);
+
+  // Discrete "jump" to a new spot (new round, caught a letter, or reappearing after a reject).
+  // Any in-progress wander offset is zeroed instantly so it doesn't stack on top of the fresh spot.
+  const placePotAt = (center: Point) => {
+    potDriftAnim.setValue({ x: 0, y: 0 });
+    setPotCenter(center);
+  };
 
   const revealWord = (word: string) => {
     if (bannerTimeoutRef.current) {
@@ -134,14 +215,14 @@ export function PlayScreen() {
     if (fieldBounds) {
       setPotVisible(true);
       setPotBlink(false);
-      setPotCenter(randomPotPosition(fieldBounds));
+      placePotAt(randomPotPosition(fieldBounds));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWord, setCurrentWord]);
 
   useEffect(() => {
     if (fieldBounds && !potCenter) {
-      setPotCenter(randomPotPosition(fieldBounds));
+      placePotAt(randomPotPosition(fieldBounds));
     }
   }, [fieldBounds, potCenter]);
 
@@ -173,7 +254,7 @@ export function PlayScreen() {
 
   const relocatePot = () => {
     if (fieldBounds) {
-      setPotCenter(randomPotPosition(fieldBounds));
+      placePotAt(randomPotPosition(fieldBounds));
     }
   };
 
@@ -283,7 +364,13 @@ export function PlayScreen() {
       return;
     }
 
-    const hit = isFlickOnTarget(potCenter, releasePoint, throwEnd);
+    // The pot may be slowly wandering (Crazy mode) — hit-test against where it actually is
+    // right now, not its last discrete "jump" position, so aim stays fair and honest.
+    const effectivePotCenter = {
+      x: potCenter.x + potDriftOffsetRef.current.x,
+      y: potCenter.y + potDriftOffsetRef.current.y,
+    };
+    const hit = isFlickOnTarget(effectivePotCenter, releasePoint, throwEnd);
     resolvingRef.current = true;
 
     Animated.timing(ghostAnim, {
@@ -367,7 +454,7 @@ export function PlayScreen() {
           <Text style={styles.fieldLabel}>Flick a letter into the honey pot</Text>
           <View ref={fieldRef} style={styles.field} onLayout={measureField}>
             {potVisible && potCenter && fieldBounds ? (
-              <View
+              <Animated.View
                 testID="honey-pot"
                 style={[
                   styles.pot,
@@ -375,11 +462,12 @@ export function PlayScreen() {
                   {
                     left: potCenter.x - fieldBounds.x - POT_SIZE / 2,
                     top: potCenter.y - fieldBounds.y - POT_SIZE / 2,
+                    transform: potDriftAnim.getTranslateTransform(),
                   },
                 ]}
               >
                 <Text style={styles.potEmoji}>🍯</Text>
-              </View>
+              </Animated.View>
             ) : null}
           </View>
 
