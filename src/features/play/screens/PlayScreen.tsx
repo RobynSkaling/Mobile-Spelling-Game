@@ -26,6 +26,32 @@ const GHOST_HALF = 28;
 const THROW_DURATION_MS = 260;
 const BLINK_INTERVAL_MS = 110;
 const BLINK_COUNT = 6;
+const CELEBRATION_BURST_MS = 800;
+const CELEBRATION_HOLD_MS = 900;
+const CELEBRATION_FADE_MS = 300;
+const CELEBRATION_TOTAL_MS = CELEBRATION_BURST_MS + CELEBRATION_HOLD_MS + CELEBRATION_FADE_MS;
+const NEXT_WORD_DELAY_MS = CELEBRATION_TOTAL_MS + 100;
+
+const CELEBRATION_PHRASES = [
+  'Amazing job!',
+  'You are a spelling superstar!',
+  'Woohoo, perfect!',
+  'Fantastic spelling!',
+  'You nailed it!',
+  'Incredible work!',
+  'Sweet as honey!',
+];
+
+const CONFETTI_EMOJIS = ['🎉', '✨', '⭐', '🍯', '🎊', '💖', '🌟', '🎈'];
+const CONFETTI_PIECES = CONFETTI_EMOJIS.map((emoji, index) => {
+  const angle = (index / CONFETTI_EMOJIS.length) * Math.PI * 2;
+  const distance = 90 + (index % 3) * 18;
+  return {
+    emoji,
+    dx: Math.cos(angle) * distance,
+    dy: Math.sin(angle) * distance,
+  };
+});
 
 function speakWord(word: string) {
   try {
@@ -37,11 +63,21 @@ function speakWord(word: string) {
   }
 }
 
+function speakPhrase(phrase: string) {
+  try {
+    Speech.stop();
+    Speech.speak(phrase, { rate: 1, pitch: 1.15 });
+  } catch {
+    // Fails silently — see speakWord above.
+  }
+}
+
 export function PlayScreen() {
   const [availableLetters, setAvailableLetters] = useState<string[]>([]);
   const [guess, setGuess] = useState('');
   const [feedback, setFeedback] = useState('Flick a letter at the honey pot!');
   const [celebrating, setCelebrating] = useState(false);
+  const [celebrationPhrase, setCelebrationPhrase] = useState('');
 
   const [containerBounds, setContainerBounds] = useState<Bounds | null>(null);
   const [fieldBounds, setFieldBounds] = useState<Bounds | null>(null);
@@ -53,10 +89,12 @@ export function PlayScreen() {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [showBanner, setShowBanner] = useState(false);
 
-  const rewardScale = useRef(new Animated.Value(0.8)).current;
   const ghostAnim = useRef(new Animated.ValueXY()).current;
   const bannerOpacity = useRef(new Animated.Value(0)).current;
   const bannerScale = useRef(new Animated.Value(0.6)).current;
+  const celebrationOpacity = useRef(new Animated.Value(0)).current;
+  const celebrationScale = useRef(new Animated.Value(0.5)).current;
+  const confettiProgress = useRef(new Animated.Value(0)).current;
   const potDriftAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<View | null>(null);
@@ -242,14 +280,38 @@ export function PlayScreen() {
   }, [containerBounds]);
 
   const triggerCelebration = () => {
+    const phrase = CELEBRATION_PHRASES[Math.floor(Math.random() * CELEBRATION_PHRASES.length)];
+    setCelebrationPhrase(phrase);
     setCelebrating(true);
-    Animated.sequence([
-      Animated.timing(rewardScale, { toValue: 1.25, duration: 180, useNativeDriver: true }),
-      Animated.timing(rewardScale, { toValue: 1, duration: 140, useNativeDriver: true }),
-    ]).start(() => {
-      setCelebrating(false);
-      rewardScale.setValue(0.8);
-    });
+
+    celebrationOpacity.setValue(0);
+    celebrationScale.setValue(0.5);
+    confettiProgress.setValue(0);
+
+    speakPhrase(phrase);
+
+    Animated.parallel([
+      Animated.timing(confettiProgress, {
+        toValue: 1,
+        duration: CELEBRATION_BURST_MS,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.spring(celebrationScale, { toValue: 1, friction: 4, useNativeDriver: true }),
+      ]),
+      Animated.timing(celebrationOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+    ]).start();
+
+    setTimeout(() => {
+      Animated.timing(celebrationOpacity, {
+        toValue: 0,
+        duration: CELEBRATION_FADE_MS,
+        useNativeDriver: true,
+      }).start(() => {
+        setCelebrating(false);
+      });
+    }, CELEBRATION_BURST_MS + CELEBRATION_HOLD_MS);
   };
 
   const relocatePot = () => {
@@ -309,7 +371,7 @@ export function PlayScreen() {
       setFeedback('Perfect! The whole word is spelled.');
       setTimeout(() => {
         setCurrentWord(getNextWord(words, currentWord));
-      }, 900);
+      }, NEXT_WORD_DELAY_MS);
       return;
     }
 
@@ -416,6 +478,10 @@ export function PlayScreen() {
         });
       }}
     >
+      <Pressable testID="back-button" style={styles.backButton} onPress={handleGoHome}>
+        <Text style={styles.backButtonText}>← Back</Text>
+      </Pressable>
+
       <Text style={styles.title}>Honey Pot Flick</Text>
       <Text style={styles.greeting}>
         {profile ? `Hi ${profile.name}! Mama Bear is cheering for you.` : 'Mama Bear is cheering for you.'}
@@ -522,13 +588,7 @@ export function PlayScreen() {
             {feedback}
           </Text>
 
-          {celebrating ? (
-            <Animated.View style={[styles.rewardBadge, { transform: [{ scale: rewardScale }] }]}>
-              <Text style={styles.rewardText}>🍯</Text>
-            </Animated.View>
-          ) : null}
-
-          {!showBanner ? (
+          {!showBanner && !celebrating ? (
             <View style={styles.cornerButtons}>
               {modeConfig.hintAllowed ? (
                 <Pressable testID="hint-button" style={styles.cornerButton} onPress={handleHintPress}>
@@ -542,6 +602,54 @@ export function PlayScreen() {
           ) : null}
         </>
       )}
+
+      {celebrating ? (
+        <View style={styles.celebrationOverlay} pointerEvents="none">
+          <View style={styles.confettiField}>
+            {CONFETTI_PIECES.map((piece, index) => (
+              <Animated.Text
+                key={`${piece.emoji}-${index}`}
+                style={[
+                  styles.confettiPiece,
+                  {
+                    opacity: confettiProgress.interpolate({
+                      inputRange: [0, 0.15, 0.75, 1],
+                      outputRange: [0, 1, 1, 0],
+                    }),
+                    transform: [
+                      {
+                        translateX: confettiProgress.interpolate({ inputRange: [0, 1], outputRange: [0, piece.dx] }),
+                      },
+                      {
+                        translateY: confettiProgress.interpolate({ inputRange: [0, 1], outputRange: [0, piece.dy] }),
+                      },
+                      {
+                        scale: confettiProgress.interpolate({
+                          inputRange: [0, 0.2, 1],
+                          outputRange: [0.3, 1.2, 0.9],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                {piece.emoji}
+              </Animated.Text>
+            ))}
+          </View>
+
+          <Animated.View
+            testID="celebration-card"
+            style={[
+              styles.celebrationCard,
+              { opacity: celebrationOpacity, transform: [{ scale: celebrationScale }] },
+            ]}
+          >
+            <Text style={styles.celebrationTitle}>🎉 PERFECT! 🎉</Text>
+            <Text style={styles.celebrationPhrase}>{celebrationPhrase}</Text>
+          </Animated.View>
+        </View>
+      ) : null}
 
       {showBanner && currentWord ? (
         <View style={styles.bannerOverlay} pointerEvents="auto">
@@ -564,9 +672,6 @@ export function PlayScreen() {
         </Pressable>
         <Pressable style={styles.secondaryButton} onPress={() => router.replace('/lists')}>
           <Text style={styles.secondaryButtonText}>📚 Word Lists</Text>
-        </Pressable>
-        <Pressable style={styles.secondaryButton} onPress={handleGoHome}>
-          <Text style={styles.secondaryButtonText}>Back home</Text>
         </Pressable>
         <Pressable style={styles.exitButton} onPress={handleExitApp}>
           <Text style={styles.exitButtonText}>Exit</Text>
@@ -709,7 +814,7 @@ const styles = StyleSheet.create({
     maxWidth: 320,
     aspectRatio: 1,
     borderRadius: 24,
-    backgroundColor: '#FFE082',
+    backgroundColor: '#F5D998',
     borderWidth: 4,
     borderColor: '#111111',
     overflow: 'hidden',
@@ -721,13 +826,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFD43B',
+    backgroundColor: theme.colors.gold,
     borderWidth: 4,
     borderColor: '#111111',
   },
   potBlinkOn: {
-    borderColor: theme.colors.primary,
-    backgroundColor: '#FF8C42',
+    borderColor: theme.colors.text,
+    backgroundColor: theme.colors.primary,
   },
   potEmoji: {
     fontSize: 34,
@@ -786,18 +891,78 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   feedbackSuccess: {
-    color: theme.colors.secondary,
-  },
-  feedbackError: {
     color: theme.colors.accent,
   },
-  rewardBadge: {
-    position: 'absolute',
-    bottom: 92,
-    right: 24,
+  feedbackError: {
+    color: theme.colors.primary,
   },
-  rewardText: {
-    fontSize: 40,
+  celebrationOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(17,17,17,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 30,
+  },
+  confettiField: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 0,
+    height: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confettiPiece: {
+    position: 'absolute',
+    fontSize: 30,
+  },
+  celebrationCard: {
+    backgroundColor: theme.colors.accent,
+    borderRadius: 28,
+    borderWidth: 6,
+    borderColor: '#111111',
+    paddingVertical: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.xl,
+    alignItems: 'center',
+    maxWidth: '85%',
+    shadowColor: '#111111',
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  celebrationTitle: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: theme.colors.surface,
+    textAlign: 'center',
+    letterSpacing: 1,
+  },
+  celebrationPhrase: {
+    marginTop: theme.spacing.sm,
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.colors.surface,
+    textAlign: 'center',
+  },
+  backButton: {
+    position: 'absolute',
+    top: theme.spacing.lg,
+    left: theme.spacing.lg,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 3,
+    borderColor: '#111111',
+    zIndex: 10,
+  },
+  backButtonText: {
+    fontWeight: '700',
+    color: theme.colors.text,
   },
   cornerButtons: {
     position: 'absolute',
@@ -878,7 +1043,7 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.xs,
     paddingHorizontal: theme.spacing.sm,
     borderRadius: 999,
-    backgroundColor: '#FFE38A',
+    backgroundColor: '#E4D4FF',
     borderWidth: 3,
     borderColor: '#111111',
   },

@@ -36,6 +36,10 @@ export function ProfileScreen() {
 
   return (
     <View style={styles.container}>
+      <Pressable style={styles.backButton} onPress={() => router.replace('/home')}>
+        <Text style={styles.backButtonText}>← Back</Text>
+      </Pressable>
+
       <Text style={styles.title}>Welcome, little learner!</Text>
       <Text style={styles.message}>
         Mama Bear is ready to help you practice your spelling with a happy little challenge.
@@ -81,6 +85,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: theme.spacing.lg,
     backgroundColor: theme.colors.background,
+  },
+  backButton: {
+    position: 'absolute',
+    top: theme.spacing.xl,
+    left: theme.spacing.lg,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 3,
+    borderColor: '#111111',
+    zIndex: 10,
+  },
+  backButtonText: {
+    fontWeight: '700',
+    color: theme.colors.text,
   },
   title: {
     fontSize: 30,
