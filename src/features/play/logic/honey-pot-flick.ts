@@ -20,8 +20,15 @@ export function shuffleLetters(items: string[]): string[] {
   return copy;
 }
 
-export function buildLetterBundle(word: string): string[] {
-  return shuffleLetters(word.split(''));
+const DECOY_LETTER_POOL = ['b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'm', 'n', 'q', 'r', 'v', 'w', 'x', 'y', 'z'];
+
+/** Builds the shuffled tray of letters for a round: the word's own letters plus `decoyCount` red herrings. */
+export function buildLetterBundle(word: string, decoyCount = 0): string[] {
+  const wordLetters = word.split('');
+  const availableDecoys = DECOY_LETTER_POOL.filter((letter) => !wordLetters.includes(letter));
+  const decoys = shuffleLetters(availableDecoys).slice(0, decoyCount);
+
+  return shuffleLetters([...wordLetters, ...decoys]);
 }
 
 export function getNextWord(words: string[], currentWord: string | null): string {

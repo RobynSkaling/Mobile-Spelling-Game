@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, TextInput } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
@@ -17,7 +17,6 @@ export function WordListsScreen() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const allLists = useMemo(() => [...BUILT_IN_WORD_LISTS, ...customLists], [customLists]);
   const atListCap = customLists.length >= MAX_CUSTOM_LISTS;
 
   const handleCreate = () => {
@@ -28,7 +27,7 @@ export function WordListsScreen() {
     }
     setNewListName('');
     setCreateError(null);
-    router.push({ pathname: '/list-editor', params: { listId: list.id } });
+    router.replace({ pathname: '/list-editor', params: { listId: list.id } });
   };
 
   const handleDeleteConfirmed = (id: string) => {
@@ -46,8 +45,8 @@ export function WordListsScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.sectionLabel}>Built-in lists</Text>
+      <ScrollView testID="word-lists-scroll" contentContainerStyle={styles.scrollContent}>
+        <Text testID="built-in-section-label" style={styles.sectionLabel}>Built-in lists</Text>
         {BUILT_IN_WORD_LISTS.map((list) => (
           <ListCard
             key={list.id}
@@ -71,7 +70,7 @@ export function WordListsScreen() {
             badge="Custom"
             isSelected={list.id === selectedListId}
             onSelect={() => selectList(list.id)}
-            onEdit={() => router.push({ pathname: '/list-editor', params: { listId: list.id } })}
+            onEdit={() => router.replace({ pathname: '/list-editor', params: { listId: list.id } })}
             onDeleteRequest={() => setConfirmDeleteId(list.id)}
             confirmingDelete={confirmDeleteId === list.id}
             onConfirmDelete={() => handleDeleteConfirmed(list.id)}

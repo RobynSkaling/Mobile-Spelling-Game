@@ -31,7 +31,7 @@ export function ProfileScreen() {
       avatar,
     });
 
-    router.push('/play');
+    router.replace('/play');
   };
 
   return (

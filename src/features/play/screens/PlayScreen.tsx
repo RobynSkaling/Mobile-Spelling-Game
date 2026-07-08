@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, Easing } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import * as Speech from 'expo-speech';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useSessionStore } from '@/stores/session-store';
 import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
+import { useGameModeStore } from '@/stores/game-mode-store';
+import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
 import {
   Bounds,
   Point,
@@ -23,6 +26,16 @@ const THROW_DURATION_MS = 260;
 const BLINK_INTERVAL_MS = 110;
 const BLINK_COUNT = 6;
 
+function speakWord(word: string) {
+  try {
+    Speech.stop();
+    Speech.speak(word, { rate: 0.85, pitch: 1.1 });
+  } catch {
+    // Speech synthesis isn't available on every platform/environment.
+    // The visual banner still communicates the word, so this fails silently.
+  }
+}
+
 export function PlayScreen() {
   const [availableLetters, setAvailableLetters] = useState<string[]>([]);
   const [guess, setGuess] = useState('');
@@ -37,9 +50,13 @@ export function PlayScreen() {
 
   const [activeLetter, setActiveLetter] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [showBanner, setShowBanner] = useState(false);
 
   const rewardScale = useRef(new Animated.Value(0.8)).current;
   const ghostAnim = useRef(new Animated.ValueXY()).current;
+  const bannerOpacity = useRef(new Animated.Value(0)).current;
+  const bannerScale = useRef(new Animated.Value(0.6)).current;
+  const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<View | null>(null);
   const fieldRef = useRef<View | null>(null);
   const resolvingRef = useRef(false);
@@ -48,6 +65,51 @@ export function PlayScreen() {
   const { profile } = useProfileStore();
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const words = useMemo(() => selectedList?.words ?? [], [selectedList]);
+  const gameMode = useGameModeStore((state) => state.mode);
+  const modeConfig = GAME_MODE_CONFIG[gameMode];
+
+  const revealWord = (word: string) => {
+    if (bannerTimeoutRef.current) {
+      clearTimeout(bannerTimeoutRef.current);
+    }
+
+    setShowBanner(true);
+    bannerOpacity.setValue(0);
+    bannerScale.setValue(0.6);
+    Animated.parallel([
+      Animated.spring(bannerScale, { toValue: 1, friction: 5, useNativeDriver: true }),
+      Animated.timing(bannerOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+    ]).start();
+
+    speakWord(word);
+
+    bannerTimeoutRef.current = setTimeout(() => {
+      Animated.timing(bannerOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => {
+        setShowBanner(false);
+      });
+    }, modeConfig.bannerDurationMs);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimeoutRef.current) {
+        clearTimeout(bannerTimeoutRef.current);
+      }
+      Speech.stop();
+    };
+  }, []);
+
+  const handleMegaphonePress = () => {
+    if (currentWord) {
+      speakWord(currentWord);
+    }
+  };
+
+  const handleHintPress = () => {
+    if (currentWord && modeConfig.hintAllowed) {
+      revealWord(currentWord);
+    }
+  };
 
   useEffect(() => {
     if (words.length === 0) {
@@ -62,11 +124,12 @@ export function PlayScreen() {
       return;
     }
 
-    setAvailableLetters(buildLetterBundle(currentWord));
+    setAvailableLetters(buildLetterBundle(currentWord, modeConfig.decoyLetterCount));
     setGuess('');
     setActiveLetter(null);
     setActiveIndex(null);
     setFeedback('Flick a letter at the honey pot!');
+    revealWord(currentWord);
 
     if (fieldBounds) {
       setPotVisible(true);
@@ -271,20 +334,21 @@ export function PlayScreen() {
         {profile ? `Hi ${profile.name}! Mama Bear is cheering for you.` : 'Mama Bear is cheering for you.'}
       </Text>
       {selectedList ? <Text style={styles.listName}>List: {selectedList.name}</Text> : null}
+      <Text style={styles.modeLine}>Mode: {modeConfig.label}</Text>
       <Text style={styles.score}>Score {score}</Text>
 
       {words.length === 0 ? (
         <View style={styles.emptyListCard}>
           <Text style={styles.emptyListText}>This list doesn't have any words yet.</Text>
-          <Pressable style={styles.secondaryButton} onPress={() => router.push('/lists')}>
+          <Pressable style={styles.secondaryButton} onPress={() => router.replace('/lists')}>
             <Text style={styles.secondaryButtonText}>Add words or pick another list</Text>
           </Pressable>
         </View>
       ) : (
         <>
           <View style={styles.targetCard}>
-            <Text style={styles.targetLabel}>Spell this word</Text>
-            <Text testID="target-word" style={styles.word}>{currentWord?.toUpperCase() ?? ''}</Text>
+            <Text style={styles.targetLabel}>Listen and spell it!</Text>
+            <Text style={styles.targetPrompt}>🎯 🍯 🐝</Text>
           </View>
 
           <View style={styles.answerRow}>
@@ -375,14 +439,42 @@ export function PlayScreen() {
               <Text style={styles.rewardText}>🍯</Text>
             </Animated.View>
           ) : null}
+
+          {!showBanner ? (
+            <View style={styles.cornerButtons}>
+              {modeConfig.hintAllowed ? (
+                <Pressable testID="hint-button" style={styles.cornerButton} onPress={handleHintPress}>
+                  <Text style={styles.cornerButtonEmoji}>💡</Text>
+                </Pressable>
+              ) : null}
+              <Pressable testID="megaphone-button" style={styles.cornerButton} onPress={handleMegaphonePress}>
+                <Text style={styles.cornerButtonEmoji}>📣</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </>
       )}
+
+      {showBanner && currentWord ? (
+        <View style={styles.bannerOverlay} pointerEvents="auto">
+          <Animated.View
+            style={[
+              styles.bannerCard,
+              { opacity: bannerOpacity, transform: [{ scale: bannerScale }] },
+            ]}
+          >
+            <Text style={styles.bannerFlourish}>🎉 ✨ 🍯 ✨ 🎉</Text>
+            <Text testID="target-word" style={styles.bannerWord}>{currentWord.toUpperCase()}</Text>
+            <Text style={styles.bannerSubtext}>Listen closely and remember it!</Text>
+          </Animated.View>
+        </View>
+      ) : null}
 
       <View style={styles.actionsRow}>
         <Pressable style={styles.secondaryButton} onPress={handleReset}>
           <Text style={styles.secondaryButtonText}>Reset game</Text>
         </Pressable>
-        <Pressable style={styles.secondaryButton} onPress={() => router.push('/lists')}>
+        <Pressable style={styles.secondaryButton} onPress={() => router.replace('/lists')}>
           <Text style={styles.secondaryButtonText}>📚 Word Lists</Text>
         </Pressable>
         <Pressable style={styles.secondaryButton} onPress={handleGoHome}>
@@ -419,6 +511,13 @@ const styles = StyleSheet.create({
     color: theme.colors.muted,
     textAlign: 'center',
     fontWeight: '600',
+    fontSize: 13,
+  },
+  modeLine: {
+    marginTop: 2,
+    color: theme.colors.muted,
+    textAlign: 'center',
+    fontWeight: '700',
     fontSize: 13,
   },
   emptyListCard: {
@@ -465,11 +564,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1.2,
   },
-  word: {
+  targetPrompt: {
     marginTop: theme.spacing.xs,
-    fontSize: 38,
-    fontWeight: '900',
-    color: theme.colors.text,
+    fontSize: 32,
   },
   answerRow: {
     marginTop: theme.spacing.sm,
@@ -613,6 +710,73 @@ const styles = StyleSheet.create({
   },
   rewardText: {
     fontSize: 40,
+  },
+  cornerButtons: {
+    position: 'absolute',
+    top: theme.spacing.lg,
+    right: theme.spacing.lg,
+    gap: theme.spacing.xs,
+    zIndex: 10,
+  },
+  cornerButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface,
+    borderWidth: 3,
+    borderColor: '#111111',
+    shadowColor: '#111111',
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 0.9,
+    shadowRadius: 0,
+  },
+  cornerButtonEmoji: {
+    fontSize: 24,
+  },
+  bannerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(17,17,17,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  bannerCard: {
+    backgroundColor: theme.colors.primary,
+    borderRadius: 28,
+    borderWidth: 6,
+    borderColor: '#111111',
+    paddingVertical: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.xl,
+    alignItems: 'center',
+    maxWidth: '85%',
+    shadowColor: '#111111',
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+  },
+  bannerFlourish: {
+    fontSize: 20,
+    marginBottom: theme.spacing.sm,
+  },
+  bannerWord: {
+    fontSize: 48,
+    fontWeight: '900',
+    color: theme.colors.surface,
+    textAlign: 'center',
+    letterSpacing: 2,
+  },
+  bannerSubtext: {
+    marginTop: theme.spacing.md,
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.colors.surface,
+    textAlign: 'center',
   },
   actionsRow: {
     marginTop: theme.spacing.lg,
