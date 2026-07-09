@@ -79,6 +79,50 @@ export function randomDriftOffset(center: Point, field: Bounds, rangePx: number,
   };
 }
 
+export function lerp(start: number, end: number, t: number): number {
+  return start + (end - start) * t;
+}
+
+/** How far along a drift's "escalation" (0 = just placed, 1 = fully escalated) `elapsedMs` represents. */
+export function driftEscalationProgress(elapsedMs: number, escalationMs: number): number {
+  if (escalationMs <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(1, elapsedMs / escalationMs));
+}
+
+export type DriftLegParams = {
+  rangePx: number;
+  legMs: number;
+};
+
+/**
+ * Interpolates wander speed/range from their starting values toward the fully-escalated ones as
+ * `elapsedMs` (time since the pot last landed somewhere) grows, then applies a bit of timing
+ * jitter — scaled by how escalated things are — so the pace feels erratic rather than a smooth,
+ * predictable ramp.
+ */
+export function escalatedDriftLeg(
+  elapsedMs: number,
+  config: {
+    potDriftRangePx: number;
+    potDriftLegMs: number;
+    potDriftMaxRangePx: number;
+    potDriftMinLegMs: number;
+    potDriftEscalationMs: number;
+  },
+  jitterRandom: number = Math.random(),
+): DriftLegParams {
+  const t = driftEscalationProgress(elapsedMs, config.potDriftEscalationMs);
+  const rangePx = lerp(config.potDriftRangePx, config.potDriftMaxRangePx, t);
+  const baseLegMs = lerp(config.potDriftLegMs, config.potDriftMinLegMs, t);
+  // Jitter grows with escalation: +/-40% of the base leg duration at full escalation, none at the start.
+  const jitter = 1 + (jitterRandom - 0.5) * 0.8 * t;
+
+  return { rangePx, legMs: Math.max(150, baseLegMs * jitter) };
+}
+
 /** Projects a straight-line throw from `origin` along the release velocity. Returns null if the flick was too weak to count. */
 export function computeThrow(origin: Point, velocity: Point): Point | null {
   const speed = Math.hypot(velocity.x, velocity.y);

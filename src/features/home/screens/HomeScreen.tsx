@@ -57,6 +57,10 @@ export function HomeScreen() {
       </Pressable>
       {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
 
+      <Pressable style={styles.parentButton} onPress={() => router.replace('/parent')}>
+        <Text style={styles.parentButtonText}>👪 Parent View</Text>
+      </Pressable>
+
       {profile ? (
         <Pressable onPress={() => router.replace('/profile')}>
           <Text style={styles.switchProfile}>Not {profile.name}? Switch profile</Text>
@@ -107,8 +111,11 @@ const styles = StyleSheet.create({
   },
   modeRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
     gap: theme.spacing.xs,
     marginBottom: theme.spacing.xs,
+    maxWidth: 320,
   },
   modeButton: {
     paddingVertical: theme.spacing.xs,
@@ -169,5 +176,19 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
     color: theme.colors.muted,
     fontWeight: '600',
+  },
+  parentButton: {
+    marginTop: theme.spacing.lg,
+    backgroundColor: theme.colors.surface,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  parentButtonText: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

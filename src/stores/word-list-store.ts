@@ -35,6 +35,7 @@ interface WordListState {
   getSelectedList: () => WordList | undefined;
   selectList: (id: string) => void;
   createList: (name: string) => { list: WordList | null; error: string | null };
+  createListWithWords: (name: string, words: string[]) => { list: WordList | null; error: string | null };
   renameList: (id: string, name: string) => void;
   deleteList: (id: string) => void;
   addWord: (listId: string, word: string) => ActionResult;
@@ -95,6 +96,51 @@ export const useWordListStore = create<WordListState>((set, get) => ({
       id: generateId(),
       name: trimmedName,
       words: [],
+      isBuiltIn: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const nextLists = [...customLists, newList];
+    set({ customLists: nextLists });
+    persist(nextLists, get().selectedListId);
+    return { list: newList, error: null };
+  },
+
+  createListWithWords: (name, words) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      return { list: null, error: 'Give the list a name first.' };
+    }
+
+    const { customLists } = get();
+    if (customLists.length >= MAX_CUSTOM_LISTS) {
+      return { list: null, error: `You already have the maximum of ${MAX_CUSTOM_LISTS} lists.` };
+    }
+
+    const seenKeys = new Set<string>();
+    const dedupedWords: string[] = [];
+    for (const raw of words) {
+      const normalized = normalizeWord(raw);
+      if (!normalized) {
+        continue;
+      }
+      const key = normalized.toLowerCase();
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+      dedupedWords.push(normalized);
+      if (dedupedWords.length >= MAX_WORDS_PER_LIST) {
+        break;
+      }
+    }
+
+    const now = Date.now();
+    const newList: WordList = {
+      id: generateId(),
+      name: trimmedName,
+      words: dedupedWords,
       isBuiltIn: false,
       createdAt: now,
       updatedAt: now,

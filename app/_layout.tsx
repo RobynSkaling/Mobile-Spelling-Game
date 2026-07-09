@@ -4,17 +4,22 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
+import { useProgressStore } from '@/stores/progress-store';
+import { speechService } from '@/shared/lib/speech';
 
 export default function RootLayout() {
   const loadProfile = useProfileStore((state) => state.loadProfile);
   const loadLists = useWordListStore((state) => state.loadLists);
   const loadMode = useGameModeStore((state) => state.loadMode);
+  const loadProgress = useProgressStore((state) => state.loadProgress);
 
   useEffect(() => {
     loadProfile();
     loadLists();
     loadMode();
-  }, [loadProfile, loadLists, loadMode]);
+    loadProgress();
+    speechService.init();
+  }, [loadProfile, loadLists, loadMode, loadProgress]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

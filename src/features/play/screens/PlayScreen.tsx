@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, Easing } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import * as Speech from 'expo-speech';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useSessionStore } from '@/stores/session-store';
 import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
+import { useProgressStore } from '@/stores/progress-store';
+import { speechService } from '@/shared/lib/speech';
 import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
 import {
   Bounds,
@@ -15,6 +16,7 @@ import {
   POT_SIZE,
   buildLetterBundle,
   computeThrow,
+  escalatedDriftLeg,
   getNextWord,
   isFlickOnTarget,
   randomDriftOffset,
@@ -32,16 +34,6 @@ const CELEBRATION_FADE_MS = 300;
 const CELEBRATION_TOTAL_MS = CELEBRATION_BURST_MS + CELEBRATION_HOLD_MS + CELEBRATION_FADE_MS;
 const NEXT_WORD_DELAY_MS = CELEBRATION_TOTAL_MS + 100;
 
-const CELEBRATION_PHRASES = [
-  'Amazing job!',
-  'You are a spelling superstar!',
-  'Woohoo, perfect!',
-  'Fantastic spelling!',
-  'You nailed it!',
-  'Incredible work!',
-  'Sweet as honey!',
-];
-
 const CONFETTI_EMOJIS = ['🎉', '✨', '⭐', '🍯', '🎊', '💖', '🌟', '🎈'];
 const CONFETTI_PIECES = CONFETTI_EMOJIS.map((emoji, index) => {
   const angle = (index / CONFETTI_EMOJIS.length) * Math.PI * 2;
@@ -52,25 +44,6 @@ const CONFETTI_PIECES = CONFETTI_EMOJIS.map((emoji, index) => {
     dy: Math.sin(angle) * distance,
   };
 });
-
-function speakWord(word: string) {
-  try {
-    Speech.stop();
-    Speech.speak(word, { rate: 0.85, pitch: 1.1 });
-  } catch {
-    // Speech synthesis isn't available on every platform/environment.
-    // The visual banner still communicates the word, so this fails silently.
-  }
-}
-
-function speakPhrase(phrase: string) {
-  try {
-    Speech.stop();
-    Speech.speak(phrase, { rate: 1, pitch: 1.15 });
-  } catch {
-    // Fails silently — see speakWord above.
-  }
-}
 
 export function PlayScreen() {
   const [availableLetters, setAvailableLetters] = useState<string[]>([]);
@@ -104,6 +77,7 @@ export function PlayScreen() {
   const potCenterRef = useRef<Point | null>(null);
   const potDriftOffsetRef = useRef<Point>({ x: 0, y: 0 });
   const driftActiveRef = useRef(false);
+  const potPlacedAtRef = useRef<number>(Date.now());
 
   const { currentWord, setCurrentWord, incrementScore, resetScore, score } = useSessionStore();
   const { profile } = useProfileStore();
@@ -111,6 +85,15 @@ export function PlayScreen() {
   const words = useMemo(() => selectedList?.words ?? [], [selectedList]);
   const gameMode = useGameModeStore((state) => state.mode);
   const modeConfig = GAME_MODE_CONFIG[gameMode];
+  const startSession = useProgressStore((state) => state.startSession);
+  const recordCorrectFlick = useProgressStore((state) => state.recordCorrectFlick);
+  const recordMissedFlick = useProgressStore((state) => state.recordMissedFlick);
+  const recordWordCompleted = useProgressStore((state) => state.recordWordCompleted);
+
+  useEffect(() => {
+    startSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     fieldBoundsRef.current = fieldBounds;
@@ -141,11 +124,15 @@ export function PlayScreen() {
       return;
     }
 
-    const target = randomDriftOffset(center, field, modeConfig.potDriftRangePx);
+    // The longer the pot has sat here without being hit (i.e. the longer the child takes to aim),
+    // the faster and more erratic each wander leg becomes.
+    const elapsed = Date.now() - potPlacedAtRef.current;
+    const { rangePx, legMs } = escalatedDriftLeg(elapsed, modeConfig);
+    const target = randomDriftOffset(center, field, rangePx);
 
     Animated.timing(potDriftAnim, {
       toValue: target,
-      duration: modeConfig.potDriftLegMs,
+      duration: legMs,
       easing: Easing.inOut(Easing.ease),
       useNativeDriver: true,
     }).start(({ finished }) => {
@@ -181,9 +168,11 @@ export function PlayScreen() {
   }, [modeConfig.potDriftEnabled, potVisible, words.length]);
 
   // Discrete "jump" to a new spot (new round, caught a letter, or reappearing after a reject).
-  // Any in-progress wander offset is zeroed instantly so it doesn't stack on top of the fresh spot.
+  // Any in-progress wander offset is zeroed instantly so it doesn't stack on top of the fresh spot,
+  // and the escalation clock restarts — a fresh pot starts at the mode's base drift speed again.
   const placePotAt = (center: Point) => {
     potDriftAnim.setValue({ x: 0, y: 0 });
+    potPlacedAtRef.current = Date.now();
     setPotCenter(center);
   };
 
@@ -200,7 +189,7 @@ export function PlayScreen() {
       Animated.timing(bannerOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
     ]).start();
 
-    speakWord(word);
+    speechService.speakWord(word);
 
     bannerTimeoutRef.current = setTimeout(() => {
       Animated.timing(bannerOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => {
@@ -214,13 +203,13 @@ export function PlayScreen() {
       if (bannerTimeoutRef.current) {
         clearTimeout(bannerTimeoutRef.current);
       }
-      Speech.stop();
+      speechService.stop();
     };
   }, []);
 
   const handleMegaphonePress = () => {
     if (currentWord) {
-      speakWord(currentWord);
+      speechService.speakWord(currentWord);
     }
   };
 
@@ -280,15 +269,14 @@ export function PlayScreen() {
   }, [containerBounds]);
 
   const triggerCelebration = () => {
-    const phrase = CELEBRATION_PHRASES[Math.floor(Math.random() * CELEBRATION_PHRASES.length)];
-    setCelebrationPhrase(phrase);
     setCelebrating(true);
 
     celebrationOpacity.setValue(0);
     celebrationScale.setValue(0.5);
     confettiProgress.setValue(0);
 
-    speakPhrase(phrase);
+    const phrase = speechService.speakPraise();
+    setCelebrationPhrase(phrase);
 
     Animated.parallel([
       Animated.timing(confettiProgress, {
@@ -356,6 +344,7 @@ export function PlayScreen() {
 
     if (letter.toLowerCase() !== expectedLetter) {
       setFeedback(`Oops! ${letter.toUpperCase()} is not the next letter.`);
+      recordMissedFlick(currentWord);
       rejectPot();
       return;
     }
@@ -365,10 +354,12 @@ export function PlayScreen() {
     setAvailableLetters((letters) => letters.filter((_, letterIndex) => letterIndex !== index));
     setFeedback('Nice throw! The honey pot caught the letter.');
     incrementScore();
+    recordCorrectFlick();
 
     if (nextGuess.length === currentWord.length) {
       triggerCelebration();
       setFeedback('Perfect! The whole word is spelled.');
+      recordWordCompleted(currentWord);
       setTimeout(() => {
         setCurrentWord(getNextWord(words, currentWord));
       }, NEXT_WORD_DELAY_MS);

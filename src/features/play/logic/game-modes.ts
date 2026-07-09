@@ -1,4 +1,4 @@
-export type GameMode = 'easy' | 'hard' | 'crazy';
+export type GameMode = 'easy' | 'hard' | 'crazy' | 'impossible';
 
 export type GameModeConfig = {
   label: string;
@@ -6,15 +6,24 @@ export type GameModeConfig = {
   bannerDurationMs: number;
   decoyLetterCount: number;
   hintAllowed: boolean;
-  /** Whether the honey pot slowly wanders around the field instead of only jumping between rounds. */
+  /** Whether the honey pot wanders around the field instead of only jumping between rounds. */
   potDriftEnabled: boolean;
-  /** How far the pot can wander from its current spot, in pixels. */
+  /** Starting wander range (px) — how far the pot can drift from its current spot right after it appears. */
   potDriftRangePx: number;
-  /** How long one leg of the wander takes — bigger is slower/gentler. */
+  /** Starting leg duration (ms) — how long one wander leg takes right after the pot appears. Lower is faster. */
   potDriftLegMs: number;
+  /** Wander range (px) once the pot has been sitting there the longest ("fully escalated"). */
+  potDriftMaxRangePx: number;
+  /** Leg duration (ms) once fully escalated. Lower is faster. */
+  potDriftMinLegMs: number;
+  /**
+   * How many milliseconds of hesitation it takes to go from the starting drift speed/range to the
+   * fully escalated one. 0 means the pot never speeds up — it drifts at a constant pace forever.
+   */
+  potDriftEscalationMs: number;
 };
 
-export const GAME_MODES: GameMode[] = ['easy', 'hard', 'crazy'];
+export const GAME_MODES: GameMode[] = ['easy', 'hard', 'crazy', 'impossible'];
 
 export const GAME_MODE_CONFIG: Record<GameMode, GameModeConfig> = {
   easy: {
@@ -26,6 +35,9 @@ export const GAME_MODE_CONFIG: Record<GameMode, GameModeConfig> = {
     potDriftEnabled: false,
     potDriftRangePx: 0,
     potDriftLegMs: 0,
+    potDriftMaxRangePx: 0,
+    potDriftMinLegMs: 0,
+    potDriftEscalationMs: 0,
   },
   hard: {
     label: 'Hard',
@@ -36,6 +48,9 @@ export const GAME_MODE_CONFIG: Record<GameMode, GameModeConfig> = {
     potDriftEnabled: false,
     potDriftRangePx: 0,
     potDriftLegMs: 0,
+    potDriftMaxRangePx: 0,
+    potDriftMinLegMs: 0,
+    potDriftEscalationMs: 0,
   },
   crazy: {
     label: 'Crazy!',
@@ -46,6 +61,22 @@ export const GAME_MODE_CONFIG: Record<GameMode, GameModeConfig> = {
     potDriftEnabled: true,
     potDriftRangePx: 55,
     potDriftLegMs: 2400,
+    potDriftMaxRangePx: 55,
+    potDriftMinLegMs: 2400,
+    potDriftEscalationMs: 0,
+  },
+  impossible: {
+    label: 'Impossible!!',
+    description: 'A flash of a reveal, tons of decoy letters, and the pot speeds up the longer you take to aim.',
+    bannerDurationMs: 900,
+    decoyLetterCount: 8,
+    hintAllowed: false,
+    potDriftEnabled: true,
+    potDriftRangePx: 40,
+    potDriftLegMs: 2000,
+    potDriftMaxRangePx: 100,
+    potDriftMinLegMs: 450,
+    potDriftEscalationMs: 6000,
   },
 };
 
