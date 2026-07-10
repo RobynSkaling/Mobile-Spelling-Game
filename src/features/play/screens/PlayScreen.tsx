@@ -9,6 +9,7 @@ import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
 import { speechService } from '@/shared/lib/speech';
+import { Confetti } from '@/shared/ui/Confetti';
 import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
 import {
   Bounds,
@@ -33,17 +34,6 @@ const CELEBRATION_HOLD_MS = 900;
 const CELEBRATION_FADE_MS = 300;
 const CELEBRATION_TOTAL_MS = CELEBRATION_BURST_MS + CELEBRATION_HOLD_MS + CELEBRATION_FADE_MS;
 const NEXT_WORD_DELAY_MS = CELEBRATION_TOTAL_MS + 100;
-
-const CONFETTI_EMOJIS = ['🎉', '✨', '⭐', '🍯', '🎊', '💖', '🌟', '🎈'];
-const CONFETTI_PIECES = CONFETTI_EMOJIS.map((emoji, index) => {
-  const angle = (index / CONFETTI_EMOJIS.length) * Math.PI * 2;
-  const distance = 90 + (index % 3) * 18;
-  return {
-    emoji,
-    dx: Math.cos(angle) * distance,
-    dy: Math.sin(angle) * distance,
-  };
-});
 
 export function PlayScreen() {
   const [availableLetters, setAvailableLetters] = useState<string[]>([]);
@@ -596,38 +586,7 @@ export function PlayScreen() {
 
       {celebrating ? (
         <View style={styles.celebrationOverlay} pointerEvents="none">
-          <View style={styles.confettiField}>
-            {CONFETTI_PIECES.map((piece, index) => (
-              <Animated.Text
-                key={`${piece.emoji}-${index}`}
-                style={[
-                  styles.confettiPiece,
-                  {
-                    opacity: confettiProgress.interpolate({
-                      inputRange: [0, 0.15, 0.75, 1],
-                      outputRange: [0, 1, 1, 0],
-                    }),
-                    transform: [
-                      {
-                        translateX: confettiProgress.interpolate({ inputRange: [0, 1], outputRange: [0, piece.dx] }),
-                      },
-                      {
-                        translateY: confettiProgress.interpolate({ inputRange: [0, 1], outputRange: [0, piece.dy] }),
-                      },
-                      {
-                        scale: confettiProgress.interpolate({
-                          inputRange: [0, 0.2, 1],
-                          outputRange: [0.3, 1.2, 0.9],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                {piece.emoji}
-              </Animated.Text>
-            ))}
-          </View>
+          <Confetti progress={confettiProgress} />
 
           <Animated.View
             testID="celebration-card"
@@ -897,19 +856,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 30,
-  },
-  confettiField: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 0,
-    height: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confettiPiece: {
-    position: 'absolute',
-    fontSize: 30,
   },
   celebrationCard: {
     backgroundColor: theme.colors.accent,

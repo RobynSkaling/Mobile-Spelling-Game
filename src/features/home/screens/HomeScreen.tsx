@@ -57,6 +57,10 @@ export function HomeScreen() {
       </Pressable>
       {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
 
+      <Pressable style={styles.finalTestButton} onPress={() => router.replace('/final-test')}>
+        <Text style={styles.finalTestButtonText}>🎓 Final Test</Text>
+      </Pressable>
+
       <Pressable style={styles.parentButton} onPress={() => router.replace('/parent')}>
         <Text style={styles.parentButtonText}>👪 Parent View</Text>
       </Pressable>
@@ -176,6 +180,20 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
     color: theme.colors.muted,
     fontWeight: '600',
+  },
+  finalTestButton: {
+    marginTop: theme.spacing.md,
+    backgroundColor: theme.colors.gold,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  finalTestButtonText: {
+    color: theme.colors.text,
+    fontSize: 16,
+    fontWeight: '700',
   },
   parentButton: {
     marginTop: theme.spacing.lg,
