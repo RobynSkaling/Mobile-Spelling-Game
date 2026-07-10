@@ -48,21 +48,23 @@ export function HomeScreen() {
       </View>
       <Text style={styles.modeDescription}>{GAME_MODE_CONFIG[mode].description}</Text>
 
-      <Pressable style={styles.button} onPress={handlePlay}>
-        <Text style={styles.buttonText}>Play</Text>
+      <Pressable testID="play-button" style={styles.playButtonWrapper} onPress={handlePlay}>
+        <View style={styles.playTriangleOutline} />
+        <View style={styles.playTriangle} />
+        <Text style={styles.playButtonText}>Play</Text>
       </Pressable>
 
-      <Pressable style={styles.listsButton} onPress={() => router.replace('/lists')}>
-        <Text style={styles.listsButtonText}>📚 Word Lists</Text>
+      <Pressable style={[styles.actionButton, styles.listsButton]} onPress={() => router.replace('/lists')}>
+        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>📚 Word Lists</Text>
       </Pressable>
       {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
 
-      <Pressable style={styles.finalTestButton} onPress={() => router.replace('/final-test')}>
-        <Text style={styles.finalTestButtonText}>🎓 Final Test</Text>
+      <Pressable style={[styles.actionButton, styles.finalTestButton]} onPress={() => router.replace('/final-test')}>
+        <Text style={styles.actionButtonText}>🎓 Final Test</Text>
       </Pressable>
 
-      <Pressable style={styles.parentButton} onPress={() => router.replace('/parent')}>
-        <Text style={styles.parentButtonText}>👪 Parent View</Text>
+      <Pressable style={[styles.actionButton, styles.parentButton]} onPress={() => router.replace('/parent')}>
+        <Text style={styles.actionButtonText}>👪 Parent View</Text>
       </Pressable>
 
       {profile ? (
@@ -122,6 +124,8 @@ const styles = StyleSheet.create({
     maxWidth: 320,
   },
   modeButton: {
+    minWidth: 128,
+    alignItems: 'center',
     paddingVertical: theme.spacing.xs,
     paddingHorizontal: theme.spacing.md,
     borderRadius: 999,
@@ -146,35 +150,73 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.lg,
     maxWidth: 260,
   },
-  button: {
-    backgroundColor: theme.colors.primary,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.xl,
-    borderRadius: 999,
+  playButtonWrapper: {
+    width: 150,
+    height: 128,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  buttonText: {
+  // A slightly larger black triangle sits directly behind the colored one, showing through as a
+  // uniform ~4px outline — the same thick-black-border look used on every other button, just
+  // built by hand since CSS border/shadow tricks don't clip to a triangle's actual silhouette.
+  playTriangleOutline: {
+    position: 'absolute',
+    left: 6,
+    top: 0,
+    width: 0,
+    height: 0,
+    borderTopWidth: 64,
+    borderBottomWidth: 64,
+    borderLeftWidth: 120,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderLeftColor: '#111111',
+  },
+  playTriangle: {
+    position: 'absolute',
+    left: 14,
+    top: 4,
+    width: 0,
+    height: 0,
+    borderTopWidth: 60,
+    borderBottomWidth: 60,
+    borderLeftWidth: 112,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderLeftColor: theme.colors.primary,
+  },
+  playButtonText: {
+    position: 'absolute',
+    left: 30,
     color: theme.colors.surface,
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '800',
   },
   switchProfile: {
     marginTop: theme.spacing.md,
     color: theme.colors.muted,
     textDecorationLine: 'underline',
   },
-  listsButton: {
+  actionButton: {
     marginTop: theme.spacing.md,
-    backgroundColor: theme.colors.secondary,
+    minWidth: 200,
+    alignItems: 'center',
     paddingVertical: theme.spacing.sm,
     paddingHorizontal: theme.spacing.lg,
     borderRadius: 999,
     borderWidth: 3,
     borderColor: '#111111',
   },
-  listsButtonText: {
-    color: theme.colors.surface,
+  actionButtonText: {
+    color: theme.colors.text,
     fontSize: 16,
     fontWeight: '700',
+  },
+  actionButtonTextLight: {
+    color: theme.colors.surface,
+  },
+  listsButton: {
+    backgroundColor: theme.colors.secondary,
   },
   selectedListLabel: {
     marginTop: theme.spacing.sm,
@@ -182,31 +224,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   finalTestButton: {
-    marginTop: theme.spacing.md,
     backgroundColor: theme.colors.gold,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
-    borderRadius: 999,
-    borderWidth: 3,
-    borderColor: '#111111',
-  },
-  finalTestButtonText: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '700',
   },
   parentButton: {
-    marginTop: theme.spacing.lg,
     backgroundColor: theme.colors.surface,
-    paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: 999,
-    borderWidth: 3,
-    borderColor: '#111111',
-  },
-  parentButtonText: {
-    color: theme.colors.text,
-    fontSize: 14,
-    fontWeight: '700',
   },
 });
