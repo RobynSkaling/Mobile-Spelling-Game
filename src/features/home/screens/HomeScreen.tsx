@@ -28,6 +28,10 @@ export function HomeScreen() {
           : 'Mama Bear is ready to help you spell with a smile.'}
       </Text>
 
+      <Pressable style={styles.instructionsButton} onPress={() => router.replace('/instructions')}>
+        <Text style={styles.instructionsButtonText}>📖 Instructions</Text>
+      </Pressable>
+
       <Text style={styles.modeLabel}>Choose your challenge</Text>
       <View style={styles.modeRow}>
         {GAME_MODES.map((gameMode) => {
@@ -46,18 +50,17 @@ export function HomeScreen() {
           );
         })}
       </View>
-      <Text style={styles.modeDescription}>{GAME_MODE_CONFIG[mode].description}</Text>
 
       <Pressable testID="play-button" style={styles.playButtonWrapper} onPress={handlePlay}>
         <View style={styles.playTriangleOutline} />
         <View style={styles.playTriangle} />
         <Text style={styles.playButtonText}>Play</Text>
       </Pressable>
+      {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
 
       <Pressable style={[styles.actionButton, styles.listsButton]} onPress={() => router.replace('/lists')}>
         <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>📚 Word Lists</Text>
       </Pressable>
-      {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
 
       <Pressable style={[styles.actionButton, styles.finalTestButton]} onPress={() => router.replace('/final-test')}>
         <Text style={styles.actionButtonText}>🎓 Final Test</Text>
@@ -107,6 +110,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: theme.spacing.xl,
   },
+  instructionsButton: {
+    marginBottom: theme.spacing.md,
+    backgroundColor: theme.colors.surface,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  instructionsButtonText: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   modeLabel: {
     fontSize: 14,
     fontWeight: '800',
@@ -120,7 +137,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     gap: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
+    marginBottom: theme.spacing.lg,
     maxWidth: 320,
   },
   modeButton: {
@@ -142,13 +159,6 @@ const styles = StyleSheet.create({
   },
   modeButtonTextSelected: {
     color: theme.colors.surface,
-  },
-  modeDescription: {
-    fontSize: 12,
-    color: theme.colors.muted,
-    textAlign: 'center',
-    marginBottom: theme.spacing.lg,
-    maxWidth: 260,
   },
   playButtonWrapper: {
     width: 150,
