@@ -6,6 +6,7 @@ import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { GAME_MODES, GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
+import { Character } from '@/shared/ui/Character';
 
 export function HomeScreen() {
   const profile = useProfileStore((state) => state.profile);
@@ -19,7 +20,7 @@ export function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.emoji}>🐻</Text>
+      <Character characterId="mama-bear" size="medium" style={styles.characterBadge} />
       <Text style={styles.title}>Mama Bear's Spelling Bee</Text>
       <Text style={styles.subtitle}>A cheerful spelling adventure for little learners.</Text>
       <Text style={styles.message}>
@@ -87,8 +88,7 @@ const styles = StyleSheet.create({
     padding: theme.spacing.lg,
     backgroundColor: theme.colors.background,
   },
-  emoji: {
-    fontSize: 64,
+  characterBadge: {
     marginBottom: theme.spacing.md,
   },
   title: {

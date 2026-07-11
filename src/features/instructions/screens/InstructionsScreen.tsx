@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { GAME_MODES, GAME_MODE_CONFIG, GameMode } from '@/features/play/logic/game-modes';
+import { Character } from '@/shared/ui/Character';
 
 const MODE_FLAVOR: Record<GameMode, { emoji: string; flavor: string }> = {
   easy: { emoji: '🐣', flavor: 'Silly Goose is still snoozing — a gentle start.' },
@@ -39,7 +40,7 @@ export function InstructionsScreen() {
         <View style={[styles.card, styles.villainsCard]}>
           <Text style={styles.cardHeading}>😈 Meet the Villains</Text>
           <View style={styles.villainRow}>
-            <Text style={styles.villainEmoji}>🪿</Text>
+            <Character characterId="silly-goose" size="small" />
             <View style={styles.villainTextBlock}>
               <Text style={styles.villainName}>Silly Goose</Text>
               <Text style={styles.villainDetail}>
@@ -49,7 +50,7 @@ export function InstructionsScreen() {
             </View>
           </View>
           <View style={styles.villainRow}>
-            <Text style={styles.villainEmoji}>🐒</Text>
+            <Character characterId="cheeky-monkey" size="small" />
             <View style={styles.villainTextBlock}>
               <Text style={styles.villainName}>Cheeky Monkey</Text>
               <Text style={styles.villainDetail}>
@@ -162,9 +163,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: theme.spacing.sm,
     gap: theme.spacing.sm,
-  },
-  villainEmoji: {
-    fontSize: 32,
   },
   villainTextBlock: {
     flex: 1,

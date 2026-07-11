@@ -1,5 +1,9 @@
 export type CharacterRole = 'hero' | 'villain';
 
+// A character's in-universe scale, independent of however big any one screen chooses to render
+// them. Used as the Character component's default size preset unless a call site overrides it.
+export type CharacterRelativeSize = 'small' | 'medium' | 'large';
+
 // Kept in sync with the folders under src/assets/artwork/characters/ — see the README there
 // for the file naming convention (<slug>-<variant>.png).
 export type CharacterImageVariant = 'idle' | 'happy' | 'icon' | 'defeated';
@@ -14,6 +18,13 @@ export type CharacterDefinition = {
   name: string;
   role: CharacterRole;
   tagline: string;
+  /** In-universe scale — see CharacterRelativeSize. */
+  relativeSize: CharacterRelativeSize;
+  /** A palette color (from the app's Retro Arcade theme) associated with this character — used
+   *  for badge backgrounds, name-tag tinting, etc. */
+  accentColor: string;
+  /** Single-glyph fallback shown wherever no artwork has been registered for a variant yet. */
+  emoji: string;
   /** Which image variants this character is expected to have. Villains add 'defeated'. */
   variants: CharacterImageVariant[];
   /** Which pre-recorded voice line variants this character is expected to have. */
@@ -32,6 +43,9 @@ export const CHARACTER_ROSTER: CharacterDefinition[] = [
     name: 'Mama Bear',
     role: 'hero',
     tagline: 'Warm, protective guardian of the honey and the game\'s host.',
+    relativeSize: 'large',
+    accentColor: '#FFD700', // gold — honey/reward association
+    emoji: '🐻',
     variants: BASE_VARIANTS,
     audioVariants: HERO_AUDIO_VARIANTS,
   },
@@ -40,6 +54,9 @@ export const CHARACTER_ROSTER: CharacterDefinition[] = [
     name: 'Professor Owl',
     role: 'hero',
     tagline: 'Wise, slightly theatrical helper who shares hints along the way.',
+    relativeSize: 'medium',
+    accentColor: '#8A2BE2', // blue violet — cool, wise tone
+    emoji: '🦉',
     variants: BASE_VARIANTS,
     audioVariants: HERO_AUDIO_VARIANTS,
   },
@@ -48,6 +65,9 @@ export const CHARACTER_ROSTER: CharacterDefinition[] = [
     name: 'Silly Goose',
     role: 'villain',
     tagline: 'Loud, dramatic troublemaker — gets carried off by the Bee Police when defeated.',
+    relativeSize: 'medium',
+    accentColor: '#FF1493', // hot pink — loud and dramatic
+    emoji: '🪿',
     variants: VILLAIN_VARIANTS,
     audioVariants: VILLAIN_AUDIO_VARIANTS,
   },
@@ -56,6 +76,9 @@ export const CHARACTER_ROSTER: CharacterDefinition[] = [
     name: 'Cheeky Monkey',
     role: 'villain',
     tagline: 'Rude, cheeky troublemaker — slides away on a banana peel when defeated.',
+    relativeSize: 'small',
+    accentColor: '#FF6347', // tomato — mischief/watch-out tone
+    emoji: '🐒',
     variants: VILLAIN_VARIANTS,
     audioVariants: VILLAIN_AUDIO_VARIANTS,
   },
@@ -69,14 +92,7 @@ export function getCharactersByRole(role: CharacterRole): CharacterDefinition[] 
   return CHARACTER_ROSTER.filter((character) => character.role === role);
 }
 
-// TODO(assets): once PNGs land in src/assets/artwork/characters/<id>/, add a
-// `CHARACTER_IMAGES: Record<string, Partial<Record<CharacterImageVariant, ImageSourcePropType>>>`
-// map here built from `require()` calls, and a `getCharacterImage(id, variant)` helper.
-//
-// TODO(assets): once voice clips land in src/assets/audio/characters/<id>/, add a similar
-// `CHARACTER_AUDIO: Record<string, Partial<Record<CharacterAudioVariant, number>>>` map (audio
-// requires resolve to a numeric module id, same as images) and a `getCharacterAudio(id, variant)`
-// helper.
-//
-// Nothing requires actual asset files yet — this module is safe to import today with no artwork
-// or audio present.
+// Image and audio lookups live in their own sibling modules (character-images.ts,
+// character-audio.ts) rather than here, since they need react-native's ImageSourcePropType and
+// will eventually hold real require() calls — this file stays a plain, platform-agnostic data
+// module that's safe to import (and unit test) anywhere.
