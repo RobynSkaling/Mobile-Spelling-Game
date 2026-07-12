@@ -47,5 +47,5 @@ The exact expected set per character is enumerated in `character-roster.ts`
 - Keep clips short (a few seconds). These are personality accents, not narration.
 - Normalize loudness across clips so no character suddenly sounds much louder/quieter than another.
 
-Nothing currently `require()`s files from this folder — see the `TODO` in
-`src/data/characters/character-roster.ts` for where that wiring goes once clips land.
+Nothing currently `require()`s files from this folder — wire new clips up in
+`src/data/characters/character-audio.ts` once they land.
