@@ -12,6 +12,19 @@ export type CharacterImageVariant = 'idle' | 'happy' | 'icon' | 'defeated';
 // for the file naming convention (<slug>-<variant>.mp3).
 export type CharacterAudioVariant = 'greeting' | 'praise' | 'taunt' | 'defeated';
 
+// Which sprite-sheet animation is currently playing for a character, set by gameplay/UI code in
+// response to events (see architecture doc Section 25.5) rather than a specific animation file
+// being referenced directly. 'Defeated', 'BeingNaughty', and 'Challenging' are villain-only, same
+// split as CharacterImageVariant's 'defeated'.
+export type CharacterAnimationState =
+  | 'Idle'
+  | 'Talking'
+  | 'Poked'
+  | 'Celebrating'
+  | 'Defeated'
+  | 'BeingNaughty'
+  | 'Challenging';
+
 export type CharacterDefinition = {
   /** Matches the asset folder slug under src/assets/artwork/characters/<id>/ and src/assets/audio/characters/<id>/. */
   id: string;
@@ -29,6 +42,9 @@ export type CharacterDefinition = {
   variants: CharacterImageVariant[];
   /** Which pre-recorded voice line variants this character is expected to have. */
   audioVariants: CharacterAudioVariant[];
+  /** Which sprite-sheet animation states this character is expected to have. Villains add
+   *  'Defeated', 'BeingNaughty', and 'Challenging'. */
+  animationStates: CharacterAnimationState[];
 };
 
 const BASE_VARIANTS: CharacterImageVariant[] = ['idle', 'happy', 'icon'];
@@ -36,6 +52,14 @@ const VILLAIN_VARIANTS: CharacterImageVariant[] = [...BASE_VARIANTS, 'defeated']
 
 const HERO_AUDIO_VARIANTS: CharacterAudioVariant[] = ['greeting', 'praise'];
 const VILLAIN_AUDIO_VARIANTS: CharacterAudioVariant[] = ['taunt', 'defeated'];
+
+const BASE_ANIMATION_STATES: CharacterAnimationState[] = ['Idle', 'Talking', 'Poked', 'Celebrating'];
+const VILLAIN_ANIMATION_STATES: CharacterAnimationState[] = [
+  ...BASE_ANIMATION_STATES,
+  'Defeated',
+  'BeingNaughty',
+  'Challenging',
+];
 
 export const CHARACTER_ROSTER: CharacterDefinition[] = [
   {
@@ -48,6 +72,7 @@ export const CHARACTER_ROSTER: CharacterDefinition[] = [
     emoji: '🐻',
     variants: BASE_VARIANTS,
     audioVariants: HERO_AUDIO_VARIANTS,
+    animationStates: BASE_ANIMATION_STATES,
   },
   {
     id: 'professor-owl',
@@ -59,6 +84,7 @@ export const CHARACTER_ROSTER: CharacterDefinition[] = [
     emoji: '🦉',
     variants: BASE_VARIANTS,
     audioVariants: HERO_AUDIO_VARIANTS,
+    animationStates: BASE_ANIMATION_STATES,
   },
   {
     id: 'silly-goose',
@@ -70,6 +96,7 @@ export const CHARACTER_ROSTER: CharacterDefinition[] = [
     emoji: '🪿',
     variants: VILLAIN_VARIANTS,
     audioVariants: VILLAIN_AUDIO_VARIANTS,
+    animationStates: VILLAIN_ANIMATION_STATES,
   },
   {
     id: 'cheeky-monkey',
@@ -81,6 +108,7 @@ export const CHARACTER_ROSTER: CharacterDefinition[] = [
     emoji: '🐒',
     variants: VILLAIN_VARIANTS,
     audioVariants: VILLAIN_AUDIO_VARIANTS,
+    animationStates: VILLAIN_ANIMATION_STATES,
   },
 ];
 
@@ -92,7 +120,7 @@ export function getCharactersByRole(role: CharacterRole): CharacterDefinition[] 
   return CHARACTER_ROSTER.filter((character) => character.role === role);
 }
 
-// Image and audio lookups live in their own sibling modules (character-images.ts,
-// character-audio.ts) rather than here, since they need react-native's ImageSourcePropType and
-// will eventually hold real require() calls — this file stays a plain, platform-agnostic data
-// module that's safe to import (and unit test) anywhere.
+// Image, audio, and animation lookups live in their own sibling modules (character-images.ts,
+// character-audio.ts, character-animations.ts) rather than here, since they need react-native's
+// ImageSourcePropType and will eventually hold real require() calls — this file stays a plain,
+// platform-agnostic data module that's safe to import (and unit test) anywhere.
