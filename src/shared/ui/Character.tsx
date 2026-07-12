@@ -22,8 +22,9 @@ export type CharacterSize = CharacterRelativeSize | number;
 export type CharacterProps = {
   /** Which character to render — matches an id in CHARACTER_ROSTER. */
   characterId: string;
-  /** Which pose/expression to show. Defaults to 'idle'. Falls back to the emoji glyph if this
-   *  variant hasn't been registered with real artwork yet. */
+  /** Which pose/expression to show. Defaults to 'idle', or a pose matching `animationState` (e.g.
+   *  'happy' for 'Celebrating') when that's passed without an explicit `variant`. Falls back to
+   *  the emoji glyph if this variant hasn't been registered with real artwork yet. */
   variant?: CharacterImageVariant;
   /** Which sprite-sheet animation to play, if any. Takes priority over `variant` when a sprite
    *  sheet is registered for it; falls back through the static pose image to the emoji glyph
@@ -41,6 +42,24 @@ function resolvePixelSize(size: CharacterSize | undefined, relativeSize: Charact
     return size;
   }
   return SIZE_PRESETS[size ?? relativeSize];
+}
+
+/**
+ * When `animationState` is passed without an explicit `variant`, the static-pose fallback should
+ * still reflect what's happening rather than always showing the neutral 'idle' pose — e.g. a
+ * villain reacting to 'Defeated' should fall back to its 'defeated' pose, not 'idle', if a sprite
+ * sheet for that state isn't registered yet. States without a more specific static pose fall back
+ * to 'idle'.
+ */
+function defaultVariantForAnimationState(animationState: CharacterAnimationState | undefined): CharacterImageVariant {
+  switch (animationState) {
+    case 'Celebrating':
+      return 'happy';
+    case 'Defeated':
+      return 'defeated';
+    default:
+      return 'idle';
+  }
 }
 
 type AnimatedSpriteProps = {
@@ -82,7 +101,7 @@ function AnimatedSprite({ characterId, animation, pixelSize }: AnimatedSpritePro
  * component work today and pick up real art automatically as it's registered in
  * character-animations.ts / character-images.ts, with no call-site changes required.
  */
-export function Character({ characterId, variant = 'idle', animationState, size, style, testID }: CharacterProps) {
+export function Character({ characterId, variant, animationState, size, style, testID }: CharacterProps) {
   const character = getCharacterById(characterId);
 
   if (!character) {
@@ -91,7 +110,8 @@ export function Character({ characterId, variant = 'idle', animationState, size,
 
   const pixelSize = resolvePixelSize(size, character.relativeSize);
   const animation = animationState ? getCharacterAnimation(characterId, animationState) : null;
-  const imageSource = animation ? null : getCharacterImage(characterId, variant);
+  const resolvedVariant = variant ?? defaultVariantForAnimationState(animationState);
+  const imageSource = animation ? null : getCharacterImage(characterId, resolvedVariant);
 
   return (
     <View

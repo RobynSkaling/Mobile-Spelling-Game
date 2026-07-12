@@ -10,7 +10,9 @@ import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
 import { speechService } from '@/shared/lib/speech';
 import { Confetti } from '@/shared/ui/Confetti';
-import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
+import { Character } from '@/shared/ui/Character';
+import { useCharacterAnimationState } from '@/shared/ui/useCharacterAnimationState';
+import { GAME_MODE_CONFIG, GameMode } from '@/features/play/logic/game-modes';
 import {
   Bounds,
   Point,
@@ -34,6 +36,16 @@ const CELEBRATION_HOLD_MS = 900;
 const CELEBRATION_FADE_MS = 300;
 const CELEBRATION_TOTAL_MS = CELEBRATION_BURST_MS + CELEBRATION_HOLD_MS + CELEBRATION_FADE_MS;
 const NEXT_WORD_DELAY_MS = CELEBRATION_TOTAL_MS + 100;
+
+// Which villain is the "on-screen antagonist" reacting to misses, per game mode — mirrors the
+// per-mode villain flavor already described to the child on InstructionsScreen (Silly Goose eases
+// in first, Cheeky Monkey brings the real trouble).
+const VILLAIN_ID_BY_MODE: Record<GameMode, string> = {
+  easy: 'silly-goose',
+  hard: 'cheeky-monkey',
+  crazy: 'silly-goose',
+  impossible: 'cheeky-monkey',
+};
 
 export function PlayScreen() {
   const [availableLetters, setAvailableLetters] = useState<string[]>([]);
@@ -79,6 +91,12 @@ export function PlayScreen() {
   const recordCorrectFlick = useProgressStore((state) => state.recordCorrectFlick);
   const recordMissedFlick = useProgressStore((state) => state.recordMissedFlick);
   const recordWordCompleted = useProgressStore((state) => state.recordWordCompleted);
+
+  const villainId = VILLAIN_ID_BY_MODE[gameMode];
+  const mamaBear = useCharacterAnimationState();
+  const villain = useCharacterAnimationState();
+  const mamaBearTap = Gesture.Tap().runOnJS(true).onEnd(() => mamaBear.trigger('Poked'));
+  const villainTap = Gesture.Tap().runOnJS(true).onEnd(() => villain.trigger('Poked'));
 
   useEffect(() => {
     startSession();
@@ -260,6 +278,12 @@ export function PlayScreen() {
 
   const triggerCelebration = () => {
     setCelebrating(true);
+    // The full-screen confetti overlay below is the "big" reward moment — Mama Bear and the
+    // villain hold their Celebrating/Defeated reaction in the persistent character row for the
+    // same duration rather than joining the overlay itself, so the two don't compete for the
+    // child's attention at once.
+    mamaBear.trigger('Celebrating', CELEBRATION_TOTAL_MS);
+    villain.trigger('Defeated', CELEBRATION_TOTAL_MS);
 
     celebrationOpacity.setValue(0);
     celebrationScale.setValue(0.5);
@@ -300,6 +324,9 @@ export function PlayScreen() {
 
   const rejectPot = () => {
     resolvingRef.current = true;
+    // Both miss branches in resolveFlick (off-target flick, wrong letter) route through here, so
+    // the villain's taunt reaction is wired once, at the shared handler, rather than duplicated.
+    villain.trigger('Challenging');
     let blinks = 0;
     const blinkTimer = setInterval(() => {
       setPotBlink((value) => !value);
@@ -345,6 +372,7 @@ export function PlayScreen() {
     setFeedback('Nice throw! The honey pot caught the letter.');
     incrementScore();
     recordCorrectFlick();
+    mamaBear.trigger('Talking');
 
     if (nextGuess.length === currentWord.length) {
       triggerCelebration();
@@ -470,6 +498,21 @@ export function PlayScreen() {
       {selectedList ? <Text style={styles.listName}>List: {selectedList.name}</Text> : null}
       <Text style={styles.modeLine}>Mode: {modeConfig.label}</Text>
       <Text style={styles.score}>Score {score}</Text>
+
+      {words.length > 0 ? (
+        <View style={styles.characterRow}>
+          <GestureDetector gesture={mamaBearTap}>
+            <View>
+              <Character characterId="mama-bear" size="medium" animationState={mamaBear.animationState} />
+            </View>
+          </GestureDetector>
+          <GestureDetector gesture={villainTap}>
+            <View>
+              <Character characterId={villainId} size="small" animationState={villain.animationState} />
+            </View>
+          </GestureDetector>
+        </View>
+      ) : null}
 
       {words.length === 0 ? (
         <View style={styles.emptyListCard}>
@@ -662,6 +705,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '700',
     fontSize: 13,
+  },
+  characterRow: {
+    marginTop: theme.spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    gap: theme.spacing.lg,
   },
   emptyListCard: {
     marginTop: theme.spacing.lg,

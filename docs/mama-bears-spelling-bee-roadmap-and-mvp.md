@@ -364,6 +364,15 @@ All four tasks above are done:
 
 A stale, untracked `src/assets/images/characters/` folder (leftover from before the artwork/audio/music/effects restructure) still exists on disk with placeholder `.gitkeep` files and its own README carrying the old "Professor Puffin" naming gap note. It was deliberately left alone rather than deleted without confirmation — it's harmless (nothing references it) but should be removed once confirmed safe.
 
+#### Re-audit note (pre-Epic 10)
+
+Before starting Epic 10, all four "Revised: Implemented" claims above were re-verified against the actual repo state (not just re-read from this doc) — all four hold up: the sprite sheet convention section, the frame-count/fps and sizing tables, the Section 25.8 sizing/compression note, and the Professor Owl naming resolution (no remaining "Professor Puffin" references anywhere in the repo outside this doc's own historical mentions of the old name). `sprites/.gitkeep` placeholders exist under all four character folders, and the artwork/audio READMEs correctly point at `character-images.ts`/`character-audio.ts`.
+
+Two things surfaced during this re-audit that don't affect Epic 9's own tasks but are worth flagging:
+
+- The "Known Follow-Up" above describes a stale `src/assets/images/characters/` folder as still existing on disk. It does not — `src/assets/images/` doesn't exist anywhere in the working tree (confirmed both via a direct listing and via git history, which shows this path was never tracked). Either it was removed after this note was written, or the note was inaccurate when written. No action needed since the folder is already gone; this line item can be considered resolved.
+- **`docs/mama-bears-spelling-bee-architecture.md` does not exist in this repository** (confirmed via file search and full git history — it has never been committed). Every "architecture Section 25.x" citation in Epics 8, 9, and 10 above refers to a document that isn't actually in the repo to check claims against. Epic 10 below was therefore built using this roadmap doc's own detailed descriptions of the intended behavior (which are specific enough to work from) plus the existing code's own conventions, rather than the architecture doc itself. This should be treated as an open flag for the user: either the architecture doc needs to be added to the repo (if it exists elsewhere, e.g. a private docs repo, the same way the "character sheet doc" is called out as living in a private planning-docs repo), or these Section 25.x references should be reconciled/removed if no such doc is coming.
+
 ---
 
 ### Epic 10 — Gameplay Event Wiring for Character Reactions
@@ -388,6 +397,20 @@ As a child playing Honey Pot Flick, I want Mama Bear and the villain to visibly 
 #### Depends On
 
 Epic 8 (needs the animation state type and the animated component to render).
+
+#### Revised: Implemented
+
+All six tasks above are built and verified. What actually landed:
+
+- `PlayScreen.tsx` now renders two `<Character>` instances in a new `characterRow`, just under the mode/score line: Mama Bear (`size="medium"`) and one villain (`size="small"`). Which villain appears is chosen per game mode by a small `VILLAIN_ID_BY_MODE` lookup (`silly-goose` for `easy`/`crazy`, `cheeky-monkey` for `hard`/`impossible`), mirroring the per-mode villain flavor text already shown on `InstructionsScreen`. Both characters are wrapped in a `GestureDetector` with `Gesture.Tap()` that sets `Poked` — purely cosmetic, no scoring/state interaction.
+- Added `src/shared/ui/useCharacterAnimationState.ts`: a hook that owns one character's current `CharacterAnimationState` plus the return-to-`Idle` timer. `trigger(state, holdMs?)` switches state immediately and (re)schedules the auto-return, cancelling any pending return from a previous trigger so the most recent reaction always wins — this is what keeps `PlayScreen.tsx` from hand-rolling more `setTimeout`s alongside its existing gameplay timers. The default hold duration per state is pure, table-driven data in a sibling module, `src/shared/ui/character-animation-state.ts` (`resolveAnimationHoldMs`), split out the same way Epic 8 split `sprite-animation.ts` from `useSpriteAnimation.ts` — dependency-free and unit-tested, while the hook itself (React state/timers) is exercised via typecheck, the test suite passing, and a manual dev-server/build check, consistent with how `useSpriteAnimation.ts` was verified in Epic 8.
+- `PlayScreen.tsx` holds two independent `useCharacterAnimationState()` instances, one for Mama Bear and one for the on-screen villain, and wires them into the existing gameplay branches:
+  - The correct-letter branch in `resolveFlick` calls `mamaBear.trigger('Talking')` on every correct flick.
+  - The shared `rejectPot()` — called from both of `resolveFlick`'s miss branches (off-target flick, wrong letter) — calls `villain.trigger('Challenging')` once, at the shared handler, rather than duplicating the call at both call sites.
+  - `triggerCelebration()` (called from the word-complete branch) calls `mamaBear.trigger('Celebrating', CELEBRATION_TOTAL_MS)` and `villain.trigger('Defeated', CELEBRATION_TOTAL_MS)`, passing the confetti overlay's own duration explicitly so both character reactions return to `Idle` right as the overlay finishes, instead of drifting out of sync on their own default hold durations.
+- **Confetti composition decision**: the full-screen `Confetti`/celebration-card overlay stays the "big" reward moment exactly as it was — the new Mama Bear/villain reactions play out in the persistent character row instead of inside the overlay, so the two don't compete for the child's attention at the same moment. A code comment at the `triggerCelebration()` call site records this reasoning for future maintainers.
+- `<Character>` (`src/shared/ui/Character.tsx`) gained one small additive fix needed to make the fallback chain actually meaningful for reactions: when `animationState` is passed without an explicit `variant`, the static-pose fallback now resolves a state-appropriate pose (`'happy'` for `Celebrating`, `'defeated'` for `Defeated`, `'idle'` otherwise) instead of always defaulting to `'idle'` regardless of what state was requested. This only changes behavior when `animationState` is passed and `variant` isn't — `HomeScreen`/`InstructionsScreen` pass neither or just `variant`, so they're unaffected.
+- **Regression-verified**: `tsc --noEmit` is clean, `npm test` passes all 14 tests (the 4 new ones covering `resolveAnimationHoldMs`, plus the 10 pre-existing ones), and `npx expo export --platform web` builds successfully. The dev server (`expo start --web`) was started and both `/` and `/play` were confirmed to respond with the bundled app shell. A live browser/screenshot check (as was done for Epic 8) wasn't available in this session — no browser-automation tool was on hand — so the PlayScreen visual check is code-review-level plus a successful bundle/serve, not a rendered screenshot. Since no sprite sheets are registered yet (Epic 9's asset pipeline is ready but no art has landed), both characters currently render via their emoji-badge fallback exactly as before on Home/Instructions — the new reactions are state changes with no visible frame animation yet, which is the expected, correct behavior until real sprite sheets land.
 
 ---
 
