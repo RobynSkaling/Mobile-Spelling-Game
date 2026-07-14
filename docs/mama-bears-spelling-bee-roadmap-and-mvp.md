@@ -414,6 +414,45 @@ All six tasks above are built and verified. What actually landed:
 
 ---
 
+### Epic 10.5 — Villain Pool, Behavior Escalation, and Honey-Pot Protection (Revision to Epic 10)
+
+#### Why This Is a Revision, Not a New Epic
+
+Epic 10 shipped real character reactions during gameplay, but took a deliberate shortcut for villain selection to keep that epic scoped: a hardcoded `VILLAIN_ID_BY_MODE` map, one fixed villain per mode, animation-only reactions. After Epic 10 shipped, the product direction for villains was fleshed out in the architecture doc (Sections 25.10 and 25.11, in the private `docs-private/mama-bears-spelling-bee-architecture.md` planning repo): a randomized villain pool (never the same villain twice in a row) shared across all modes, a per-mode behavior-tier ladder tied to a deliberate age-targeting curve, and a concrete honey-pot-protection mechanic that gives villains a real gameplay interaction at higher tiers instead of just cosmetic animation. Rather than rewriting Epic 10's own record of what was built and verified, this gap and the follow-on work are recorded here as Epic 10.5 — Epic 10 stands as delivered history, this epic supersedes its villain-selection tasks and adds new ones.
+
+#### Objective
+
+Replace Epic 10's placeholder villain selection with the pool/tier model from architecture Section 25.10, and implement the honey-larder steal/defend/recover mechanic from Section 25.11, so villain presence and behavior scale with difficulty mode instead of being fixed and animation-only.
+
+#### User Story
+
+As a child playing Honey Pot Flick, I want a different villain to show up each time I play (never the same one twice in a row), and I want that villain to act more mischievously the harder I play — from just teasing me on easy, up to actually trying to steal Mama Bear's honey on the hardest mode — so the game keeps feeling fresh and the challenge escalates with more than just harder words.
+
+#### Tasks
+
+**Supersedes Epic 10's fixed villain lookup:**
+- Add `src/data/characters/villain-pool.ts`: the `VillainPoolConfig` (a single shared `defaultPool` across all modes, per architecture 25.10.2 — modes do not narrow the pool) and the pure `pickNextVillain(eligible, lastVillainId, random)` selector (25.10.3): uniform random pick, excluding the immediately previous villain, with a single-villain-pool fallback that allows the repeat.
+- Track `lastVillainId` for the session and call the selector once per new game/round, replacing `VILLAIN_ID_BY_MODE` in `PlayScreen.tsx`.
+- Add the `mode -> tier` ladder and `tier -> capabilities` per-game data (25.10.4): `Passive`/`Taunting`/`Interfering`/`Relentless` mapped from `easy`/`hard`/`crazy`/`impossible`, with Honey Pot Flick's capability set per tier.
+
+**New — the honey-pot-protection mechanic (architecture Section 25.11):**
+- Add `honeyStash` (plus a never-below-floor guard and earn-on-word-complete) to `session-store.ts`, kept fully separate from `score`/mastery records so a steal can never distort the progress data parents see.
+- Add a small persistent honey-larder UI to `PlayScreen.tsx` (the row of collected pots the villain can menace), within the existing Section 25.8 on-screen animation budget.
+- Implement the pure `StealAttempt` state machine (`Safe -> Telegraphing -> {Defended | Stolen} -> Safe`) and a per-tier `StealTuning` table, unit-tested with injected timing.
+- Wire the Honey Pot Flick `StealAttemptHost`: open attempts from the existing `rejectPot()` miss handler at `Interfering`+, resolve via the next correct flick or a villain shoo-tap, apply consequences/recovery, drive `BeingNaughty` state and larder visuals.
+- Gate steal machinery behind tier (no steal machinery instantiated at `Passive`) and behind reduce-motion (soft pose-swap instead of a travel/scamper animation when enabled).
+
+#### Depends On
+
+Epic 10 (the character rendering, tap gesture, and `useCharacterAnimationState` hook this builds on) and Epic 8 (the animation-state plumbing). Architecture doc Sections 25.10–25.11 (`docs-private/mama-bears-spelling-bee-architecture.md`) are the full design reference — read those before implementing; they specify the exact algorithms, per-tier tuning tables, and trade-off rationale that this epic's tasks only summarize.
+
+#### Product Decisions Locked In (architecture Section 25.10, confirmed)
+
+- The same villain pool applies to every difficulty mode — all escalation comes from behavior tier, never from which villains are eligible to appear.
+- The four-tier ladder (`easy`/`hard`/`crazy`/`impossible`) is a deliberate, portfolio-wide age-targeting curve (~6/7/8/9-year-olds respectively, with most 10-year-olds expected to age out of the product), shared across all planned future games — the tier names and order are a stable cross-game contract, not per-game/per-mode tuning knobs.
+
+---
+
 ### Epic 11 — Character Voice Line Playback
 
 #### Objective
