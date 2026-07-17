@@ -9,6 +9,7 @@ import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
 import { speechService } from '@/shared/lib/speech';
+import { characterAudioService } from '@/shared/lib/character-audio';
 import { Confetti } from '@/shared/ui/Confetti';
 import { Character } from '@/shared/ui/Character';
 import { useCharacterAnimationState } from '@/shared/ui/useCharacterAnimationState';
@@ -366,6 +367,7 @@ export function PlayScreen() {
         clearTimeout(bannerTimeoutRef.current);
       }
       speechService.stop();
+      characterAudioService.stopAll();
     };
   }, []);
 
@@ -443,8 +445,15 @@ export function PlayScreen() {
     celebrationScale.setValue(0.5);
     confettiProgress.setValue(0);
 
-    const phrase = speechService.speakPraise();
-    setCelebrationPhrase(phrase);
+    // Epic 11: a pre-recorded praise clip (Mama Bear's actual voice) takes priority over the
+    // generic TTS phrase when one is registered, so the two don't talk over each other — the TTS
+    // phrase (and its on-card caption) is the fallback for when no clip exists, which is every
+    // character today, so this is currently always the TTS path below.
+    const playedPraiseClip = characterAudioService.playCharacterLine('mama-bear', 'praise');
+    setCelebrationPhrase(playedPraiseClip ? '' : speechService.speakPraise());
+    if (villainId) {
+      characterAudioService.playCharacterLine(villainId, 'defeated');
+    }
 
     Animated.parallel([
       Animated.timing(confettiProgress, {
@@ -481,6 +490,12 @@ export function PlayScreen() {
     // Both miss branches in resolveFlick (off-target flick, wrong letter) route through here, so
     // the villain's taunt reaction is wired once, at the shared handler, rather than duplicated.
     villain.trigger('Challenging');
+    // Epic 11: a low-risk extension beyond the roadmap task's two mandatory hookups (Celebrating ->
+    // praise, Defeated -> defeated) — Challenging is the natural taunt moment, and no TTS is tied
+    // to this event today, so there's no coexistence question here.
+    if (villainId) {
+      characterAudioService.playCharacterLine(villainId, 'taunt');
+    }
     // A steal attempt only ever opens off a child mistake (25.11.3) — this is that hook. No-ops
     // below Taunting tier (openStealAttempt itself no-ops when stealTuning is null).
     openStealAttempt();
