@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, Easing, AccessibilityInfo } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
-import { useSessionStore } from '@/stores/session-store';
+import { HONEY_LARDER_FLOOR, useSessionStore } from '@/stores/session-store';
 import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
@@ -12,7 +12,16 @@ import { speechService } from '@/shared/lib/speech';
 import { Confetti } from '@/shared/ui/Confetti';
 import { Character } from '@/shared/ui/Character';
 import { useCharacterAnimationState } from '@/shared/ui/useCharacterAnimationState';
-import { GAME_MODE_CONFIG, GameMode } from '@/features/play/logic/game-modes';
+import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
+import { getVillainBehaviorTier } from '@/data/characters/villain-behavior';
+import {
+  defendStealAttempt,
+  getStealTuning,
+  resolveStealWindUp,
+  SAFE_STEAL_ATTEMPT,
+  StealAttempt,
+  triggerStealAttempt,
+} from '@/data/characters/steal-attempt';
 import {
   Bounds,
   Point,
@@ -37,15 +46,13 @@ const CELEBRATION_FADE_MS = 300;
 const CELEBRATION_TOTAL_MS = CELEBRATION_BURST_MS + CELEBRATION_HOLD_MS + CELEBRATION_FADE_MS;
 const NEXT_WORD_DELAY_MS = CELEBRATION_TOTAL_MS + 100;
 
-// Which villain is the "on-screen antagonist" reacting to misses, per game mode — mirrors the
-// per-mode villain flavor already described to the child on InstructionsScreen (Silly Goose eases
-// in first, Cheeky Monkey brings the real trouble).
-const VILLAIN_ID_BY_MODE: Record<GameMode, string> = {
-  easy: 'silly-goose',
-  hard: 'cheeky-monkey',
-  crazy: 'silly-goose',
-  impossible: 'cheeky-monkey',
-};
+// How many pots the honey-larder row draws before collapsing the rest into a "+N" — keeps the
+// persistent row small and legible instead of growing unbounded over a long session.
+const HONEY_LARDER_DISPLAY_CAP = 6;
+// A steal-completed scamper is a brief comedic beat, not a full return-to-Idle hold.
+const STEAL_SCAMPER_HOLD_MS = 700;
+// How long the villain's reach/lunge toward the larder (and back) takes.
+const STEAL_LUNGE_ANIM_MS = 260;
 
 export function PlayScreen() {
   const [availableLetters, setAvailableLetters] = useState<string[]>([]);
@@ -81,7 +88,29 @@ export function PlayScreen() {
   const driftActiveRef = useRef(false);
   const potPlacedAtRef = useRef<number>(Date.now());
 
-  const { currentWord, setCurrentWord, incrementScore, resetScore, score } = useSessionStore();
+  const [stealAttempt, setStealAttempt] = useState<StealAttempt>(SAFE_STEAL_ATTEMPT);
+  const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false);
+  const stealAttemptRef = useRef<StealAttempt>(SAFE_STEAL_ATTEMPT);
+  const stealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const villainLungeAnim = useRef(new Animated.Value(0)).current;
+  // Mirrors honeyStash for the recursive drift loop below (wanderPotStep), which — like
+  // fieldBoundsRef/potCenterRef — can keep recursing on a closure from an earlier render, so it
+  // must read state through a ref rather than a destructured value to stay current.
+  const honeyStashRef = useRef(0);
+
+  const {
+    currentWord,
+    setCurrentWord,
+    incrementScore,
+    resetScore,
+    score,
+    honeyStash,
+    villainId,
+    pickSessionVillain,
+    earnHoneyPot,
+    stealHoneyPot,
+    resetHoneyStash,
+  } = useSessionStore();
   const { profile } = useProfileStore();
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const words = useMemo(() => selectedList?.words ?? [], [selectedList]);
@@ -92,15 +121,38 @@ export function PlayScreen() {
   const recordMissedFlick = useProgressStore((state) => state.recordMissedFlick);
   const recordWordCompleted = useProgressStore((state) => state.recordWordCompleted);
 
-  const villainId = VILLAIN_ID_BY_MODE[gameMode];
+  // The villain-behavior tier (25.10.4) drives whether steal machinery exists at all — `null`
+  // tuning at Passive means no steal state is ever instantiated, purely Epic 10's animation-only
+  // taunt behavior.
+  const villainTier = getVillainBehaviorTier(gameMode);
+  const stealTuning = getStealTuning(villainTier);
+
   const mamaBear = useCharacterAnimationState();
   const villain = useCharacterAnimationState();
   const mamaBearTap = Gesture.Tap().runOnJS(true).onEnd(() => mamaBear.trigger('Poked'));
-  const villainTap = Gesture.Tap().runOnJS(true).onEnd(() => villain.trigger('Poked'));
+  const villainTap = Gesture.Tap()
+    .runOnJS(true)
+    .onEnd(() => {
+      // At any tier with steal machinery, a tap during the wind-up is a valid shoo-tap defense
+      // (25.11.3's secondary defense) — otherwise the tap stays the purely cosmetic Poked reaction
+      // Epic 10 shipped.
+      if (stealTuning?.allowTapDefense && stealAttemptRef.current.status === 'Telegraphing') {
+        handleStealDefended();
+        return;
+      }
+      villain.trigger('Poked');
+    });
 
   useEffect(() => {
     startSession();
+    pickSessionVillain(gameMode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled?.().then(setReduceMotionEnabled).catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener?.('reduceMotionChanged', setReduceMotionEnabled);
+    return () => subscription?.remove();
   }, []);
 
   useEffect(() => {
@@ -112,12 +164,107 @@ export function PlayScreen() {
   }, [potCenter]);
 
   useEffect(() => {
+    stealAttemptRef.current = stealAttempt;
+  }, [stealAttempt]);
+
+  useEffect(() => {
+    honeyStashRef.current = honeyStash;
+  }, [honeyStash]);
+
+  useEffect(() => {
     const id = potDriftAnim.addListener((value) => {
       potDriftOffsetRef.current = value;
     });
     return () => potDriftAnim.removeListener(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (stealTimeoutRef.current) {
+        clearTimeout(stealTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Transient reach/lunge toward the larder and back, from the villain's stable home position in
+  // characterRow (25.10.5) — never a relocation onto the play field. Softened to a plain pose
+  // swap under reduce-motion; the steal's state/consequence still applies either way (25.8).
+  const runStealTravel = (towardLarder: boolean) => {
+    if (reduceMotionEnabled) {
+      return;
+    }
+    Animated.timing(villainLungeAnim, {
+      toValue: towardLarder ? 1 : 0,
+      duration: STEAL_LUNGE_ANIM_MS,
+      easing: Easing.inOut(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const clearStealTimeout = () => {
+    if (stealTimeoutRef.current) {
+      clearTimeout(stealTimeoutRef.current);
+      stealTimeoutRef.current = null;
+    }
+  };
+
+  /** Resolves an open attempt once its wind-up window elapses undefended (host-owned timing —
+   *  the pure state machine in steal-attempt.ts has no timers of its own). */
+  const resolveStealTimeout = () => {
+    stealTimeoutRef.current = null;
+    if (!stealTuning) {
+      return;
+    }
+
+    const { next, outcome, resource } = resolveStealWindUp(stealAttemptRef.current, stealTuning);
+    setStealAttempt(next);
+    runStealTravel(false);
+
+    if (outcome === 'Stolen' && resource != null) {
+      const stole = stealHoneyPot();
+      villain.trigger(stole ? 'BeingNaughty' : 'Idle', STEAL_SCAMPER_HOLD_MS);
+    } else if (outcome === 'Retreated') {
+      villain.trigger('Idle');
+    }
+  };
+
+  /** Opens a steal attempt (Safe -> Telegraphing) if the tier has steal machinery, nothing is
+   *  already open, and the larder has a pot above its floor to put at risk. */
+  const openStealAttempt = () => {
+    if (!stealTuning || stealAttemptRef.current.status === 'Telegraphing') {
+      return;
+    }
+
+    // pickResourceInJeopardy(): the larder has no per-pot identity, just a count, so any pot above
+    // the floor is "the" resource at risk — a null resource is exactly how the floor guard
+    // (never steal the last pot) prevents an attempt from opening at all. stealHoneyPot() itself
+    // re-checks the floor as the source of truth when the attempt actually resolves, so this is a
+    // fast, optimistic pre-check to avoid telegraphing a steal that can never land.
+    const resource = honeyStashRef.current > HONEY_LARDER_FLOOR ? 'larder-pot' : null;
+    const next = triggerStealAttempt(stealAttemptRef.current, resource);
+    if (next === stealAttemptRef.current) {
+      return;
+    }
+
+    setStealAttempt(next);
+    villain.trigger('BeingNaughty', stealTuning.windUpMs);
+    runStealTravel(true);
+
+    clearStealTimeout();
+    stealTimeoutRef.current = setTimeout(resolveStealTimeout, stealTuning.windUpMs);
+  };
+
+  /** The primary defense (next correct flick) and secondary defense (shoo-tap) both call this. */
+  const handleStealDefended = () => {
+    if (stealAttemptRef.current.status !== 'Telegraphing') {
+      return;
+    }
+    clearStealTimeout();
+    setStealAttempt(defendStealAttempt(stealAttemptRef.current));
+    runStealTravel(false);
+    villain.trigger('Poked');
+  };
 
   const wanderPotStep = () => {
     if (!driftActiveRef.current) {
@@ -135,6 +282,13 @@ export function PlayScreen() {
     // The longer the pot has sat here without being hit (i.e. the longer the child takes to aim),
     // the faster and more erratic each wander leg becomes.
     const elapsed = Date.now() - potPlacedAtRef.current;
+
+    // Relentless also opens a steal attempt on a stall, not just a miss — reusing this same
+    // escalation clock, so dithering too long is treated the same as the drift speeding up.
+    if (stealTuning?.triggerOnStall && elapsed >= modeConfig.potDriftEscalationMs) {
+      openStealAttempt();
+    }
+
     const { rangePx, legMs } = escalatedDriftLeg(elapsed, modeConfig);
     const target = randomDriftOffset(center, field, rangePx);
 
@@ -327,6 +481,9 @@ export function PlayScreen() {
     // Both miss branches in resolveFlick (off-target flick, wrong letter) route through here, so
     // the villain's taunt reaction is wired once, at the shared handler, rather than duplicated.
     villain.trigger('Challenging');
+    // A steal attempt only ever opens off a child mistake (25.11.3) — this is that hook. No-ops
+    // below Taunting tier (openStealAttempt itself no-ops when stealTuning is null).
+    openStealAttempt();
     let blinks = 0;
     const blinkTimer = setInterval(() => {
       setPotBlink((value) => !value);
@@ -373,11 +530,15 @@ export function PlayScreen() {
     incrementScore();
     recordCorrectFlick();
     mamaBear.trigger('Talking');
+    // The primary defense (25.11.3): landing the next correct flick shoos an open steal attempt,
+    // regardless of whether this flick also completes the word.
+    handleStealDefended();
 
     if (nextGuess.length === currentWord.length) {
       triggerCelebration();
       setFeedback('Perfect! The whole word is spelled.');
       recordWordCompleted(currentWord);
+      earnHoneyPot();
       setTimeout(() => {
         setCurrentWord(getNextWord(words, currentWord));
       }, NEXT_WORD_DELAY_MS);
@@ -459,6 +620,7 @@ export function PlayScreen() {
 
   const handleReset = () => {
     resetScore();
+    resetHoneyStash();
     if (words.length > 0) {
       setCurrentWord(words[0]);
     }
@@ -506,11 +668,46 @@ export function PlayScreen() {
               <Character characterId="mama-bear" size="medium" animationState={mamaBear.animationState} />
             </View>
           </GestureDetector>
-          <GestureDetector gesture={villainTap}>
-            <View>
-              <Character characterId={villainId} size="small" animationState={villain.animationState} />
-            </View>
-          </GestureDetector>
+          {villainId ? (
+            <GestureDetector gesture={villainTap}>
+              <Animated.View
+                style={{
+                  transform: [
+                    { translateY: villainLungeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 14] }) },
+                    { scale: villainLungeAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] }) },
+                  ],
+                }}
+              >
+                <Character characterId={villainId} size="small" animationState={villain.animationState} />
+              </Animated.View>
+            </GestureDetector>
+          ) : null}
+        </View>
+      ) : null}
+
+      {words.length > 0 ? (
+        <View testID="honey-larder" style={styles.honeyLarderRow}>
+          <Text style={styles.honeyLarderLabel}>Honey saved</Text>
+          <Animated.View
+            style={[
+              styles.honeyLarderPots,
+              stealAttempt.status === 'Telegraphing' && styles.honeyLarderPotsInJeopardy,
+              {
+                transform: [
+                  { scale: villainLungeAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) },
+                ],
+              },
+            ]}
+          >
+            {Array.from({ length: Math.min(honeyStash, HONEY_LARDER_DISPLAY_CAP) }).map((_, index) => (
+              <Text key={index} style={styles.honeyLarderPotEmoji}>
+                🍯
+              </Text>
+            ))}
+            {honeyStash > HONEY_LARDER_DISPLAY_CAP ? (
+              <Text style={styles.honeyLarderOverflow}>+{honeyStash - HONEY_LARDER_DISPLAY_CAP}</Text>
+            ) : null}
+          </Animated.View>
         </View>
       ) : null}
 
@@ -712,6 +909,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'flex-end',
     gap: theme.spacing.lg,
+  },
+  honeyLarderRow: {
+    marginTop: theme.spacing.xs,
+    alignItems: 'center',
+  },
+  honeyLarderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  honeyLarderPots: {
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 999,
+  },
+  honeyLarderPotsInJeopardy: {
+    backgroundColor: 'rgba(255, 99, 71, 0.25)',
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+  },
+  honeyLarderPotEmoji: {
+    fontSize: 18,
+    marginHorizontal: 1,
+  },
+  honeyLarderOverflow: {
+    marginLeft: 4,
+    fontSize: 13,
+    fontWeight: '700',
+    color: theme.colors.muted,
   },
   emptyListCard: {
     marginTop: theme.spacing.lg,
