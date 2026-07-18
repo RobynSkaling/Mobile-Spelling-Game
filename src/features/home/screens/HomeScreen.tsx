@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useProfileStore } from '@/stores/profile-store';
@@ -19,10 +19,13 @@ export function HomeScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
       <Character characterId="mama-bear" size="medium" style={styles.characterBadge} />
       <Text style={styles.title}>Mama Bear's Spelling Bee</Text>
-      <Text style={styles.subtitle}>A cheerful spelling adventure for little learners.</Text>
       <Text style={styles.message}>
         {profile
           ? `Welcome back, ${profile.name}! Mama Bear missed you.`
@@ -76,17 +79,20 @@ export function HomeScreen() {
           <Text style={styles.switchProfile}>Not {profile.name}? Switch profile</Text>
         </Pressable>
       ) : null}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: theme.spacing.lg,
-    backgroundColor: theme.colors.background,
   },
   characterBadge: {
     marginBottom: theme.spacing.md,
@@ -95,12 +101,6 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '700',
     color: theme.colors.text,
-    textAlign: 'center',
-    marginBottom: theme.spacing.sm,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: theme.colors.muted,
     textAlign: 'center',
     marginBottom: theme.spacing.sm,
   },
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 112,
     borderTopColor: 'transparent',
     borderBottomColor: 'transparent',
-    borderLeftColor: theme.colors.primary,
+    borderLeftColor: theme.colors.success,
   },
   playButtonText: {
     position: 'absolute',

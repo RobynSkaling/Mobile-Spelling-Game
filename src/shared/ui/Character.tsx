@@ -9,6 +9,7 @@ import {
 } from '@/data/characters/character-roster';
 import { getCharacterImage } from '@/data/characters/character-images';
 import { getCharacterAnimation, SpriteSheetAnimation } from '@/data/characters/character-animations';
+import { useReduceMotion } from '@/shared/lib/accessibility';
 import { useSpriteAnimation } from './useSpriteAnimation';
 
 const SIZE_PRESETS: Record<CharacterRelativeSize, number> = {
@@ -100,16 +101,26 @@ function AnimatedSprite({ characterId, animation, pixelSize }: AnimatedSpritePro
  * and finally the character's emoji glyph on its accent-colored badge — so screens using this
  * component work today and pick up real art automatically as it's registered in
  * character-animations.ts / character-images.ts, with no call-site changes required.
+ *
+ * Architecture 25.8: when the OS-level reduce-motion setting is on, the animated-sprite tier is
+ * skipped entirely — this always resolves to the static pose image (or the emoji glyph, if that
+ * pose isn't registered either) even when a real sprite sheet exists for the requested state.
+ * `resolvedVariant` still tracks `animationState` as normal, so the pose keeps switching on state
+ * changes ("Celebrating" still shows the happy pose, "Defeated" still shows the defeated pose) —
+ * only the frame-by-frame animation is suppressed, per 25.8's "still switching poses on state
+ * changes" requirement.
  */
 export function Character({ characterId, variant, animationState, size, style, testID }: CharacterProps) {
   const character = getCharacterById(characterId);
+  const reduceMotionEnabled = useReduceMotion();
 
   if (!character) {
     return null;
   }
 
   const pixelSize = resolvePixelSize(size, character.relativeSize);
-  const animation = animationState ? getCharacterAnimation(characterId, animationState) : null;
+  const animation =
+    animationState && !reduceMotionEnabled ? getCharacterAnimation(characterId, animationState) : null;
   const resolvedVariant = variant ?? defaultVariantForAnimationState(animationState);
   const imageSource = animation ? null : getCharacterImage(characterId, resolvedVariant);
 

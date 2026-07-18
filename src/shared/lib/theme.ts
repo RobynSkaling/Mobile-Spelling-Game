@@ -5,6 +5,7 @@ export const theme = {
     secondary: '#8A2BE2', // Blue Violet — secondary actions, letter tiles
     accent: '#FF1493', // Hot/Deep Pink — celebration, highlights, success feedback
     gold: '#FFD700', // Gold — honey pots, rewards, the "selected" state
+    success: '#32CD32', // Lime Green — go/play actions
     background: '#00BFFF', // Deep Sky Blue — page background
     surface: '#FFFFFF',
     text: '#111111',

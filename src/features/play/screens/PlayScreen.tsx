@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Easing, AccessibilityInfo } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, Easing } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
@@ -10,10 +10,13 @@ import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
 import { speechService } from '@/shared/lib/speech';
 import { characterAudioService } from '@/shared/lib/character-audio';
+import { useReduceMotion } from '@/shared/lib/accessibility';
 import { Confetti } from '@/shared/ui/Confetti';
 import { Character } from '@/shared/ui/Character';
 import { useCharacterAnimationState } from '@/shared/ui/useCharacterAnimationState';
+import { checkAnimationBudget } from '@/shared/ui/animation-budget';
 import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
+import { CharacterRelativeSize, getCharacterById } from '@/data/characters/character-roster';
 import { getVillainBehaviorTier } from '@/data/characters/villain-behavior';
 import {
   defendStealAttempt,
@@ -90,7 +93,9 @@ export function PlayScreen() {
   const potPlacedAtRef = useRef<number>(Date.now());
 
   const [stealAttempt, setStealAttempt] = useState<StealAttempt>(SAFE_STEAL_ATTEMPT);
-  const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false);
+  // Epic 12: shared with Character.tsx's own sprite-playback gating rather than each wiring its
+  // own AccessibilityInfo listener — see src/shared/lib/accessibility/useReduceMotion.ts.
+  const reduceMotionEnabled = useReduceMotion();
   const stealAttemptRef = useRef<StealAttempt>(SAFE_STEAL_ATTEMPT);
   const stealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const villainLungeAnim = useRef(new Animated.Value(0)).current;
@@ -151,12 +156,6 @@ export function PlayScreen() {
   }, []);
 
   useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled?.().then(setReduceMotionEnabled).catch(() => {});
-    const subscription = AccessibilityInfo.addEventListener?.('reduceMotionChanged', setReduceMotionEnabled);
-    return () => subscription?.remove();
-  }, []);
-
-  useEffect(() => {
     fieldBoundsRef.current = fieldBounds;
   }, [fieldBounds]);
 
@@ -171,6 +170,32 @@ export function PlayScreen() {
   useEffect(() => {
     honeyStashRef.current = honeyStash;
   }, [honeyStash]);
+
+  // Architecture 25.8's on-screen animation budget, checked (not just assumed) against the actual
+  // characters this screen renders. `characterRow` below is mama-bear plus at most one villain —
+  // there's no dynamic/unbounded character list on this screen — so this dev-only warning is a
+  // cheap invariant check rather than a runtime gate; see the roadmap Epic 12 write-up for why a
+  // heavier enforcement mechanism (e.g. a global animation-budget registry) wasn't built.
+  useEffect(() => {
+    if (!__DEV__) {
+      return;
+    }
+    const mamaBearCharacter = getCharacterById('mama-bear');
+    const villainCharacter = villainId ? getCharacterById(villainId) : undefined;
+    const entries = [
+      mamaBearCharacter
+        ? { relativeSize: mamaBearCharacter.relativeSize, isAnimating: mamaBear.animationState !== 'Idle' }
+        : null,
+      villainCharacter
+        ? { relativeSize: villainCharacter.relativeSize, isAnimating: villain.animationState !== 'Idle' }
+        : null,
+    ].filter((entry): entry is { relativeSize: CharacterRelativeSize; isAnimating: boolean } => entry != null);
+
+    const budget = checkAnimationBudget(entries);
+    if (!budget.withinBudget) {
+      console.warn('[PlayScreen] on-screen animation budget exceeded (architecture 25.8):', budget);
+    }
+  }, [villainId, mamaBear.animationState, villain.animationState]);
 
   useEffect(() => {
     const id = potDriftAnim.addListener((value) => {
