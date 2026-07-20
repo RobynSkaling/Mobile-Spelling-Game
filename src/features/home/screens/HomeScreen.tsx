@@ -5,7 +5,9 @@ import { theme } from '@/shared/lib/theme';
 import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
+import { useGameSelectionStore } from '@/stores/game-selection-store';
 import { GAME_MODES, GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
+import { GAMES, GAME_CONFIG } from '@/features/play/logic/games';
 import { Character } from '@/shared/ui/Character';
 
 export function HomeScreen() {
@@ -13,9 +15,15 @@ export function HomeScreen() {
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const mode = useGameModeStore((state) => state.mode);
   const setMode = useGameModeStore((state) => state.setMode);
+  const selectedGame = useGameSelectionStore((state) => state.selectedGame);
+  const setSelectedGame = useGameSelectionStore((state) => state.setSelectedGame);
 
   const handlePlay = () => {
-    router.replace(profile ? '/play' : '/profile');
+    if (!profile) {
+      router.replace('/profile');
+      return;
+    }
+    router.replace(selectedGame === 'bee-line' ? '/bee-line' : '/play');
   };
 
   return (
@@ -36,18 +44,37 @@ export function HomeScreen() {
         <Text style={styles.instructionsButtonText}>📖 Instructions</Text>
       </Pressable>
 
-      <Text style={styles.modeLabel}>Choose your challenge</Text>
-      <View style={styles.modeRow}>
+      <Text style={styles.sectionLabel}>Choose your game</Text>
+      <View style={styles.pillRow}>
+        {GAMES.map((gameId) => {
+          const selected = gameId === selectedGame;
+          return (
+            <Pressable
+              key={gameId}
+              testID={`game-${gameId}`}
+              style={[styles.pillButton, selected && styles.gamePillSelected]}
+              onPress={() => setSelectedGame(gameId)}
+            >
+              <Text style={[styles.pillButtonText, selected && styles.pillButtonTextSelected]}>
+                {GAME_CONFIG[gameId].label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Text style={styles.sectionLabel}>Choose your challenge</Text>
+      <View style={styles.pillRow}>
         {GAME_MODES.map((gameMode) => {
           const selected = gameMode === mode;
           return (
             <Pressable
               key={gameMode}
               testID={`mode-${gameMode}`}
-              style={[styles.modeButton, selected && styles.modeButtonSelected]}
+              style={[styles.pillButton, selected && styles.modePillSelected]}
               onPress={() => setMode(gameMode)}
             >
-              <Text style={[styles.modeButtonText, selected && styles.modeButtonTextSelected]}>
+              <Text style={[styles.pillButtonText, selected && styles.pillButtonTextSelected]}>
                 {GAME_MODE_CONFIG[gameMode].label}
               </Text>
             </Pressable>
@@ -62,17 +89,34 @@ export function HomeScreen() {
       </Pressable>
       {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
 
-      <Pressable style={[styles.actionButton, styles.listsButton]} onPress={() => router.replace('/lists')}>
-        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>📚 Word Lists</Text>
-      </Pressable>
+      <View style={styles.actionsRow}>
+        <Pressable
+          testID="lists-button"
+          style={[styles.actionButtonCompact, styles.listsButton]}
+          onPress={() => router.replace('/lists')}
+        >
+          <Text style={styles.actionButtonEmoji}>📚</Text>
+          <Text style={[styles.actionButtonLabel, styles.actionButtonLabelLight]}>Word Lists</Text>
+        </Pressable>
 
-      <Pressable style={[styles.actionButton, styles.finalTestButton]} onPress={() => router.replace('/final-test')}>
-        <Text style={styles.actionButtonText}>🎓 Final Test</Text>
-      </Pressable>
+        <Pressable
+          testID="final-test-button"
+          style={[styles.actionButtonCompact, styles.finalTestButton]}
+          onPress={() => router.replace('/final-test')}
+        >
+          <Text style={styles.actionButtonEmoji}>🎓</Text>
+          <Text style={styles.actionButtonLabel}>Final Test</Text>
+        </Pressable>
 
-      <Pressable style={[styles.actionButton, styles.parentButton]} onPress={() => router.replace('/parent')}>
-        <Text style={styles.actionButtonText}>👪 Parent View</Text>
-      </Pressable>
+        <Pressable
+          testID="parent-button"
+          style={[styles.actionButtonCompact, styles.parentButton]}
+          onPress={() => router.replace('/parent')}
+        >
+          <Text style={styles.actionButtonEmoji}>👪</Text>
+          <Text style={styles.actionButtonLabel}>Parent View</Text>
+        </Pressable>
+      </View>
 
       {profile ? (
         <Pressable onPress={() => router.replace('/profile')}>
@@ -95,23 +139,23 @@ const styles = StyleSheet.create({
     padding: theme.spacing.lg,
   },
   characterBadge: {
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
   },
   title: {
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: '700',
+    color: theme.colors.text,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xs,
+  },
+  message: {
+    fontSize: 14,
     color: theme.colors.text,
     textAlign: 'center',
     marginBottom: theme.spacing.sm,
   },
-  message: {
-    fontSize: 15,
-    color: theme.colors.text,
-    textAlign: 'center',
-    marginBottom: theme.spacing.xl,
-  },
   instructionsButton: {
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
     backgroundColor: theme.colors.surface,
     paddingVertical: theme.spacing.xs,
     paddingHorizontal: theme.spacing.md,
@@ -124,23 +168,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  modeLabel: {
-    fontSize: 14,
+  sectionLabel: {
+    fontSize: 13,
     fontWeight: '800',
     color: theme.colors.text,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: theme.spacing.xs,
   },
-  modeRow: {
+  pillRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
     gap: theme.spacing.xs,
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
     maxWidth: 320,
   },
-  modeButton: {
+  pillButton: {
     minWidth: 128,
     alignItems: 'center',
     paddingVertical: theme.spacing.xs,
@@ -150,17 +194,24 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#111111',
   },
-  modeButtonSelected: {
+  // The game row uses `secondary` (Blue Violet) for its selected pill and the mode row keeps
+  // `primary` (Tomato) — two different colors so the two stacked rows read as distinct choices
+  // rather than one long list of settings (UX Step 13).
+  gamePillSelected: {
+    backgroundColor: theme.colors.secondary,
+  },
+  modePillSelected: {
     backgroundColor: theme.colors.primary,
   },
-  modeButtonText: {
+  pillButtonText: {
     fontWeight: '800',
     color: theme.colors.text,
   },
-  modeButtonTextSelected: {
+  pillButtonTextSelected: {
     color: theme.colors.surface,
   },
   playButtonWrapper: {
+    marginTop: theme.spacing.xs,
     width: 150,
     height: 128,
     alignItems: 'center',
@@ -203,35 +254,49 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   switchProfile: {
-    marginTop: theme.spacing.md,
+    marginTop: theme.spacing.sm,
     color: theme.colors.muted,
     textDecorationLine: 'underline',
-  },
-  actionButton: {
-    marginTop: theme.spacing.md,
-    minWidth: 200,
-    alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
-    borderRadius: 999,
-    borderWidth: 3,
-    borderColor: '#111111',
-  },
-  actionButtonText: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  actionButtonTextLight: {
-    color: theme.colors.surface,
-  },
-  listsButton: {
-    backgroundColor: theme.colors.secondary,
   },
   selectedListLabel: {
     marginTop: theme.spacing.sm,
     color: theme.colors.muted,
     fontWeight: '600',
+  },
+  // Word Lists / Final Test / Parent View as one horizontal row of compact icon+label buttons
+  // instead of three stacked full-width pills — reclaims a lot of vertical space so Parent View
+  // stays reachable without heavy scrolling, even after the game-picker row above added height.
+  actionsRow: {
+    marginTop: theme.spacing.md,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: theme.spacing.sm,
+  },
+  actionButtonCompact: {
+    width: 92,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.xs,
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  actionButtonEmoji: {
+    fontSize: 22,
+  },
+  actionButtonLabel: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.text,
+    textAlign: 'center',
+  },
+  actionButtonLabelLight: {
+    color: theme.colors.surface,
+  },
+  listsButton: {
+    backgroundColor: theme.colors.secondary,
   },
   finalTestButton: {
     backgroundColor: theme.colors.gold,

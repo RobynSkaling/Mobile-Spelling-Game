@@ -135,83 +135,6 @@ export function PlayScreen() {
 
   const mamaBear = useCharacterAnimationState();
   const villain = useCharacterAnimationState();
-  const mamaBearTap = Gesture.Tap().runOnJS(true).onEnd(() => mamaBear.trigger('Poked'));
-  const villainTap = Gesture.Tap()
-    .runOnJS(true)
-    .onEnd(() => {
-      // At any tier with steal machinery, a tap during the wind-up is a valid shoo-tap defense
-      // (25.11.3's secondary defense) — otherwise the tap stays the purely cosmetic Poked reaction
-      // Epic 10 shipped.
-      if (stealTuning?.allowTapDefense && stealAttemptRef.current.status === 'Telegraphing') {
-        handleStealDefended();
-        return;
-      }
-      villain.trigger('Poked');
-    });
-
-  useEffect(() => {
-    startSession();
-    pickSessionVillain(gameMode);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    fieldBoundsRef.current = fieldBounds;
-  }, [fieldBounds]);
-
-  useEffect(() => {
-    potCenterRef.current = potCenter;
-  }, [potCenter]);
-
-  useEffect(() => {
-    stealAttemptRef.current = stealAttempt;
-  }, [stealAttempt]);
-
-  useEffect(() => {
-    honeyStashRef.current = honeyStash;
-  }, [honeyStash]);
-
-  // Architecture 25.8's on-screen animation budget, checked (not just assumed) against the actual
-  // characters this screen renders. `characterRow` below is mama-bear plus at most one villain —
-  // there's no dynamic/unbounded character list on this screen — so this dev-only warning is a
-  // cheap invariant check rather than a runtime gate; see the roadmap Epic 12 write-up for why a
-  // heavier enforcement mechanism (e.g. a global animation-budget registry) wasn't built.
-  useEffect(() => {
-    if (!__DEV__) {
-      return;
-    }
-    const mamaBearCharacter = getCharacterById('mama-bear');
-    const villainCharacter = villainId ? getCharacterById(villainId) : undefined;
-    const entries = [
-      mamaBearCharacter
-        ? { relativeSize: mamaBearCharacter.relativeSize, isAnimating: mamaBear.animationState !== 'Idle' }
-        : null,
-      villainCharacter
-        ? { relativeSize: villainCharacter.relativeSize, isAnimating: villain.animationState !== 'Idle' }
-        : null,
-    ].filter((entry): entry is { relativeSize: CharacterRelativeSize; isAnimating: boolean } => entry != null);
-
-    const budget = checkAnimationBudget(entries);
-    if (!budget.withinBudget) {
-      console.warn('[PlayScreen] on-screen animation budget exceeded (architecture 25.8):', budget);
-    }
-  }, [villainId, mamaBear.animationState, villain.animationState]);
-
-  useEffect(() => {
-    const id = potDriftAnim.addListener((value) => {
-      potDriftOffsetRef.current = value;
-    });
-    return () => potDriftAnim.removeListener(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (stealTimeoutRef.current) {
-        clearTimeout(stealTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // Transient reach/lunge toward the larder and back, from the villain's stable home position in
   // characterRow (25.10.5) — never a relocation onto the play field. Softened to a plain pose
@@ -291,6 +214,84 @@ export function PlayScreen() {
     runStealTravel(false);
     villain.trigger('Poked');
   };
+
+  const mamaBearTap = Gesture.Tap().runOnJS(true).onEnd(() => mamaBear.trigger('Poked'));
+  const villainTap = Gesture.Tap()
+    .runOnJS(true)
+    .onEnd(() => {
+      // At any tier with steal machinery, a tap during the wind-up is a valid shoo-tap defense
+      // (25.11.3's secondary defense) — otherwise the tap stays the purely cosmetic Poked reaction
+      // Epic 10 shipped.
+      if (stealTuning?.allowTapDefense && stealAttemptRef.current.status === 'Telegraphing') {
+        handleStealDefended();
+        return;
+      }
+      villain.trigger('Poked');
+    });
+
+  useEffect(() => {
+    startSession();
+    pickSessionVillain(gameMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    fieldBoundsRef.current = fieldBounds;
+  }, [fieldBounds]);
+
+  useEffect(() => {
+    potCenterRef.current = potCenter;
+  }, [potCenter]);
+
+  useEffect(() => {
+    stealAttemptRef.current = stealAttempt;
+  }, [stealAttempt]);
+
+  useEffect(() => {
+    honeyStashRef.current = honeyStash;
+  }, [honeyStash]);
+
+  // Architecture 25.8's on-screen animation budget, checked (not just assumed) against the actual
+  // characters this screen renders. `characterRow` below is mama-bear plus at most one villain —
+  // there's no dynamic/unbounded character list on this screen — so this dev-only warning is a
+  // cheap invariant check rather than a runtime gate; see the roadmap Epic 12 write-up for why a
+  // heavier enforcement mechanism (e.g. a global animation-budget registry) wasn't built.
+  useEffect(() => {
+    if (!__DEV__) {
+      return;
+    }
+    const mamaBearCharacter = getCharacterById('mama-bear');
+    const villainCharacter = villainId ? getCharacterById(villainId) : undefined;
+    const entries = [
+      mamaBearCharacter
+        ? { relativeSize: mamaBearCharacter.relativeSize, isAnimating: mamaBear.animationState !== 'Idle' }
+        : null,
+      villainCharacter
+        ? { relativeSize: villainCharacter.relativeSize, isAnimating: villain.animationState !== 'Idle' }
+        : null,
+    ].filter((entry): entry is { relativeSize: CharacterRelativeSize; isAnimating: boolean } => entry != null);
+
+    const budget = checkAnimationBudget(entries);
+    if (!budget.withinBudget) {
+      console.warn('[PlayScreen] on-screen animation budget exceeded (architecture 25.8):', budget);
+    }
+  }, [villainId, mamaBear.animationState, villain.animationState]);
+
+  useEffect(() => {
+    const id = potDriftAnim.addListener((value) => {
+      potDriftOffsetRef.current = value;
+    });
+    return () => potDriftAnim.removeListener(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (stealTimeoutRef.current) {
+        clearTimeout(stealTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const wanderPotStep = () => {
     if (!driftActiveRef.current) {
