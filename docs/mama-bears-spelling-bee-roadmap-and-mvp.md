@@ -545,3 +545,560 @@ Three of the four tasks above are built and verified; the fourth is genuinely bl
 - **On-screen animation budget (task 3) — scope deliberately kept small.** `src/shared/ui/animation-budget.ts` (+ `.test.ts`) adds a pure, RN-independent `checkAnimationBudget(entries, limits?)` following the same "pure logic in a sibling file" convention as `sprite-animation.ts`/`character-animation-state.ts`: `AnimationBudgetEntry` is just `{ relativeSize: CharacterRelativeSize, isAnimating: boolean }`, and `DEFAULT_ANIMATION_BUDGET` encodes 25.8's literal numbers (`maxLargeAnimating: 2`, `maxSmallVillainsAnimating: 2`). `'medium'` is folded into the "large" bucket rather than treated as a third tier, since 25.8's prose only names two buckets and a medium-scale character (Professor Owl, or the Silly Goose villain) reads as the "large actively-animating character" case, not the "couple of small looping villains" case — flagged here as a judgment call since the architecture doc doesn't spell out where `'medium'` falls. `PlayScreen.tsx` wires this in as a dev-only (`__DEV__`-gated) `console.warn` check, recomputed whenever `mamaBear.animationState`, `villain.animationState`, or `villainId` changes, built from the screen's actual two character slots (`characterRow` is mama-bear plus at most one villain — there is no dynamic or unbounded character list on this screen today). This is deliberately **not** a runtime-blocking gate, a global animation-budget registry, or a context provider consumed by future screens — `PlayScreen` is the only screen with animating characters today, so there is nothing yet to register against, consistent with how Epic 10.5's `villain-capabilities.ts` was kept as "descriptive metadata, not yet consumed" rather than over-built for hypothetical future games. `animation-budget.test.ts` also asserts, directly against `CHARACTER_ROSTER`, that mama-bear plus *any* villain in the pool (both actively animating at once, the worst case `PlayScreen` can currently produce — see `triggerCelebration()`'s simultaneous `Celebrating`/`Defeated` triggers) stays within budget, and that the full four-character roster animating at once would not — a sanity check that the utility actually bites rather than trivially passing everything.
 - **Task 4 (Android smoke-test) — not done, explicitly blocked, not silently skipped or faked.** This task requires a physical or emulated Android device and real sprite-sheet artwork to measure frame smoothness against; neither exists yet. `character-animations.ts` still registers zero sprite sheets for any character (confirmed above), so there is no animation to actually play and profile — any "smoke test" performed today would only be measuring an idle/empty scene, which would not answer the question the task asks ("is the plain Reanimated crop-offset approach smooth enough") and would misrepresent this task as complete. No emulator/device session was fabricated and no placeholder sprite sheet was created to manufacture a result. This mirrors how earlier epics (e.g. Epic 9) flagged sub-tasks blocked on missing prerequisites rather than quietly omitting them — this task should stay open and be picked back up once an artist delivers at least one real sprite sheet and an Android device/emulator is available in the working environment.
 - **Regression-verified**: `npm test` passes 51/51 (8 new tests: 6 for `checkAnimationBudget`'s own logic, 2 asserting `PlayScreen`'s actual character composition against the budget — no count regression from the pre-existing 43), `tsc --noEmit` is clean, and `npx expo export --platform web` builds successfully (2.13 MB web bundle, unchanged size, no errors). `expo start --web` was started and both `/` and `/play` returned HTTP 200 with no bundling or console errors in the Metro log; as in Epics 10, 10.5, and 11's own write-ups, no browser-automation tool was available in this session, so this is a bundle/serve-level check plus code review, not a rendered screenshot — and since reduce-motion's effect is only observable with a real sprite sheet registered (there are none), there is nothing to visually diff yet regardless.
+
+---
+
+### Epic 13 — Proprietary Licensing Correction
+
+#### Objective
+
+Replace the GNU GPLv3 license currently at the repository root with an explicit proprietary "All Rights Reserved" license, since this software is not intended to be open-source, and correct any other packaging metadata that currently implies otherwise.
+
+#### User Story
+
+As the product owner, I want the codebase to carry an explicit proprietary license instead of the GPLv3 text it currently has, so that no one can assume rights to copy, modify, or redistribute this software under GPL's copyleft terms.
+
+#### Tasks
+
+- Replace the full text of the root `LICENSE` file with a proprietary "All Rights Reserved" notice, copyright holder Robyn Skaling, 2026.
+- Add/correct the `license` field in `package.json` (currently absent) to reflect the proprietary status — the npm convention for closed-source packages is `"UNLICENSED"`, which also causes `npm publish` to refuse to publish the package by default, a meaningful safety property worth having.
+- Audit the rest of the repo (README, any other manifest files) for other GPL/open-source license references or badges that would now be inconsistent with the corrected LICENSE file, and correct them.
+- Confirm this change only concerns the license under which this codebase itself is distributed — third-party dependencies (`react`, `expo`, etc.) remain under their own separate open-source licenses as installed packages, unaffected and requiring no action.
+
+#### Depends On
+
+None — standalone licensing/legal-correctness housekeeping, independent of the animation/gameplay epics.
+
+#### Revised: Implemented
+
+All four tasks above are done; one adjacent finding is flagged rather than silently fixed. What actually landed:
+
+- **`LICENSE`** (repo root): the full GNU GPLv3 text is replaced end-to-end with a standard proprietary "All Rights Reserved" notice — copyright holder Robyn Skaling, year 2026 — including the standard "AS IS" warranty disclaimer and liability limitation paragraph (kept intact per this epic's own instruction not to leave the copyright holder with less liability protection than before).
+- **`package.json`**: a `"license": "UNLICENSED"` field was added directly under `"private": true` (there was no pre-existing `"license"` key to conflict with, confirmed by reading the file before editing). `"UNLICENSED"` is the correct npm-convention value here rather than a real SPDX identifier like `"MIT"` or `"Apache-2.0"` — it's the standard way to mark a package closed-source, and it also makes `npm publish` refuse to publish by default, which is a meaningful accidental-publish safeguard for a private app that will never be an npm package.
+- **Audit of README.md, `docs/`, and other manifests**: grepped the repo root and `docs/` (excluding `node_modules`) for `GPL`, `GNU`, `MIT`, `Apache`, `open source`/`open-source`, and generic `license` references. The only matches outside `LICENSE` and this epic's own spec text were unrelated hits on the literal substring "license" inside code/prose with no license-status meaning (e.g. `AnimationBudgetLimits`, a "custom limits override" test name, a `handleSubmit` handler, an `onSubmitEditing` prop) — no GPL/MIT/Apache badge, header, or reference exists anywhere in README.md or `package-lock.json`. No change was needed beyond the two files above.
+- **`docs-private/` submodule audit — a real finding, flagged, not silently fixed.** `docs-private/LICENSE` (checked out at commit `0752a89`, remote `github.com/RobynSkaling/Private-Game-Planning-Documentation`) is the MIT-style **Unlicense** (public-domain dedication) — a separate, more permissive-than-GPL open-source license, and equally inconsistent with the proprietary status this epic establishes for the main repo. Nothing else in `docs-private/` (its five other `.md` docs) contains any GPL/MIT/Apache reference beyond that `LICENSE` file. This file was **not modified**: `docs-private` is a separate git repository with its own remote and commit history, and changing/committing its `LICENSE` is a distinct git operation from anything in this repo's own commit — outside what this epic's task list authorized. This is called out here for the product owner to action as a follow-up (likely a one-line swap to the same proprietary notice, committed and pushed within that submodule's own repo, then the submodule pointer bumped in this repo the same way Epic 10.5's `docs-private` bump was done).
+- **Third-party dependency licenses** (`react`, `expo`, `zustand`, etc. in `node_modules`): confirmed untouched and out of scope, as instructed — this epic only concerns the license under which this repository's own code is distributed, not the separate open-source licenses those installed packages carry.
+- **Regression-verified**: `npm test` passes 51/51 (no count change — this epic touches no test-covered logic), `tsc --noEmit` is clean, and `npx expo export --platform web` builds successfully (2.13 MB web bundle, unchanged size, no errors) — confirming the `package.json` edit didn't break JSON parsing or the build pipeline. No UI/runtime behavior changes are expected or were made, so there was nothing to smoke-test in the running app, per this epic's own scope.
+
+---
+
+## 11. Epics 14–17 — Phase 2: Second Gameplay Mode and Daily Rewards
+
+These epics flesh out the two headline deliverables of **Phase 2 — Engagement and Retention** (Section 2, ~line 47), which until now existed only as one-line bullets ("Second gameplay mode" / "Daily streaks or rewards"). This is not new roadmap scope — it is the detailed definition of scope Phase 2 already anticipated. Epics 14–16 are the second gameplay mode; Epic 17 is the daily-rewards loop.
+
+These are written at the product/UX-intent level for a UX designer and architect to review next. They deliberately stop short of data models, file locations, and algorithms — that is the architect's layer to add underneath these stories, in this same document, the same way Epics 8–12 added technical task breakdowns under product-defined objectives. Where a decision belongs to UX or architecture rather than product, it is flagged inline as an open question rather than pre-decided here.
+
+### Terminology note the architect must read first — "medium" vs. `hard`
+
+The founder's brief for the new mode described its four difficulty steps as **easy / medium / crazy / impossible**. That is the same four-tier ladder every game in this portfolio already shares — it is described colloquially, with "medium" standing in for the tier this codebase and the architecture doc already call **`hard`**. Throughout Epics 14–16, the founder's "medium" is written as **`hard`** to stay consistent with:
+
+- `src/features/play/logic/game-modes.ts`, where the four modes are already `easy` / `hard` / `crazy` / `impossible` with a `GAME_MODE_CONFIG` per mode; and
+- the private architecture doc's **cross-game tier contract** (`docs-private/mama-bears-spelling-bee-architecture.md`, Section 25.10.4): `easy → Passive`, `hard → Taunting`, `crazy → Interfering`, `impossible → Relentless`, tied to a deliberate age-targeting curve (≈6/7/8/9-year-olds) and explicitly declared a stable, portfolio-wide constant that must **not** be renamed, renumbered, or re-tiered per game or per mode.
+
+**No fifth tier and no new tier names are introduced by the new mode.** The new game is a *sibling* of Honey Pot Flick built on the same four-mode selector already on the Home screen — the child picks the same `easy` / `hard` / `crazy` / `impossible` mode, and it means the same age-band thing it already means; only the gameplay behind the selection differs. Architect: if any implementation detail below seems to imply a new difficulty axis, treat that as a wording slip on our part and reconcile it back to the existing four-mode contract, not as a request to fork the ladder.
+
+### Working name for the new mode — a suggestion, not a locked decision
+
+The founder described this informally as a "centipede-style" mode where collected letters form a growing "snake" or "train." For an in-fiction, honey/bee-themed name consistent with the Mama Bear world, the product suggestion is **"Bee Line"** — a bee makes a *beeline* for each correct letter, and the collected letters trail behind it in a growing line, which fits the chain/train mechanic and the bee theme without needing the child to know the word "centipede." Alternatives worth putting in front of the UX designer: **"Honey Trail," "Nectar Run," "Busy Bee,"** or **"Buzz Train."**
+
+**This is a naming suggestion for the UX designer to react to, not a locked decision.** "Bee Line" is used as a placeholder label throughout Epics 14–16 purely so the epics read cleanly; the final in-fiction name (and how it appears on the mode selector) is UX's call. Flagged here so nobody downstream treats "Bee Line" as a shipped, signed-off name.
+
+### How the character/villain system connects to Bee Line — a question for UX/architecture, not decided here
+
+Honey Pot Flick already drives the shared `CharacterAnimationState` contract (Epics 8–10) and the villain pool / behavior-tier / honey-steal machinery (Epic 10.5): Mama Bear reacts to correct letters and word completion, and a tier-scaled villain taunts, interferes, and at higher tiers tries to steal honey. Bee Line raises the obvious question of **how much of that reuse carries over** — e.g. does Mama Bear celebrate a completed word the same way, does a villain react to a wrong-order pickup or a wrong-letter scatter, and does the `impossible`-tier timeout explosion (Epic 16) get a villain reaction the way a Honey Pot Flick miss does? This is deliberately **not** decided in these epics: it touches the existing `CharacterAnimationState` contract and the villain-behavior/tier model, which are the architect's to extend, and the emotional staging of those reactions is UX's to design. See "Open Questions for UX/Architecture Review" at the end of Epic 15 and Epic 16.
+
+---
+
+### Epic 14 — Bee Line: Core Collect-in-Order Mechanic (All Four Tiers)
+
+#### Objective
+
+Deliver the second gameplay mode as a sibling of Honey Pot Flick: a 2D screen of scattered letters that the child collects **in the correct spelling order**, with the interaction escalating across the same four difficulty modes already on the Home screen (`easy` / `hard` / `crazy` / `impossible`). This epic owns the core collect-in-order interaction and its per-tier behavior. The running-score/penalty model is Epic 15; the `impossible`-tier time pressure and explosion moment is Epic 16 — this epic delivers everything up to but not including those two.
+
+#### User Story
+
+As a child aged 6–9, I want to hunt for the letters of my word around the screen and collect them one by one in the right order — with a bee that gathers them into a growing trail as I go — so that spelling feels like an active treasure hunt instead of typing.
+
+#### Tasks
+
+- Add Bee Line as a second gameplay mode reachable from the **existing four-mode selector on the Home screen** — the child picks `easy` / `hard` / `crazy` / `impossible` exactly as they do for Honey Pot Flick, and it maps to the same age-band tiers. The mode should feel like a sibling built on the same mode selection, not a separate difficulty system (see the terminology note above).
+- Present the target word to the child (reveal/pronunciation consistent with how Honey Pot Flick already introduces a word) and scatter its letters across a 2D play field, with the collection target being "select the letters in correct spelling order to build the word."
+- Implement the per-tier interaction escalation defined in the acceptance criteria below (`easy` = tap-in-order, `hard`+ = drag-and-chain, `crazy`+ = decoys mixed in, `impossible` = randomized positions each attempt).
+- Give clear immediate feedback on each correct pickup (the letter joins the trail; sound/visual confirmation), consistent with the product's "silly, satisfying, fast" tone.
+- Advance to the next word on completion and support a "next word" flow, matching the round/session shape Honey Pot Flick already uses so a session can mix or repeat words the same way.
+- Leave the running-score behavior and the wrong-order / wrong-letter mistake handling to Epic 15, and the `impossible` timer/explosion to Epic 16 — this epic should treat a fully-collected word as "complete" and hand off to those epics for what happens on mistakes and under time pressure.
+
+#### Acceptance Criteria by Tier
+
+Each tier is independently testable — "done" for the mode means all four of these are demonstrably true. The tiers are additive: each higher tier keeps the prior tier's behavior and layers one new demand on top.
+
+- **`easy` (Passive tier, ≈6-year-olds) — tap-to-collect, no chain.**
+  - Letters are scattered on the field; the child collects them by **tapping/selecting** them one at a time.
+  - No dragging and no chain/trail-forming is required at this tier — it is the simplest possible expression of the mechanic.
+  - Tapping the correct next letter registers it as collected with positive feedback; the word builds up in order as correct letters are tapped.
+  - Only the word's own letters are present (no decoys) — consistent with `easy`'s existing `decoyLetterCount: 0` in `GAME_MODE_CONFIG`.
+  - *Note flagged for UX/architecture:* whether `easy`'s tap mode still shows a light version of the growing-trail visual (for consistency with higher tiers) or stays deliberately trail-free is a UX call — the founder specified "no chain-forming yet" for the mechanic, but the visual affordance is open.
+
+- **`hard` (Taunting tier, ≈7-year-olds) — drag-to-collect, growing trail.**
+  - The child **drags** to pick letters up in the correct order (rather than tapping).
+  - Each correctly collected letter **joins a visibly growing trail/train** that now travels together — the "snake gets longer with each correct pickup," led by the bee.
+  - The trail's letters move together as a single connected chain as the child continues collecting.
+  - Still no decoys at this tier (consistent with `hard`'s current `decoyLetterCount: 3` being a *Honey Pot Flick* tuning value — see open question below on whether Bee Line reuses or overrides per-mode decoy counts).
+
+- **`crazy` (Interfering tier, ≈8-year-olds) — decoys mixed in.**
+  - Same drag-and-chain mechanic as `hard`.
+  - **Decoy letters** (letters not in the target word, and/or incorrect/repeated letters) are scattered among the correct ones. The child must visually pick out and collect **only** the correct letters, in the correct order, ignoring the decoys.
+  - Decoys are present on the field but collecting one is a *mistake* — the consequence of touching a decoy is defined in Epic 15 (wrong-letter scatter), not here.
+
+- **`impossible` (Relentless tier, ≈9-year-olds) — decoys + randomized positions (timer/explosion is Epic 16).**
+  - Builds on `crazy`: correct and incorrect letters on the field, **and the positions are re-randomized each attempt** rather than fixed, so the child can't memorize a spatial pattern across retries.
+  - This epic delivers the decoy + position-randomization base only. The hard time-pressure mechanic (speeding music, word-length-scaled timer) and the letter-trail explosion on timeout are **Epic 16** and are not in scope here.
+
+#### Open Questions for UX/Architecture Review
+
+- **Decoy counts per tier for Bee Line.** `GAME_MODE_CONFIG` already carries a `decoyLetterCount` per mode, but those numbers were tuned for Honey Pot Flick's flick field. Does Bee Line reuse the same per-mode decoy counts, or does the drag-and-hunt field want its own tuning? Product's steer: Bee Line should honor the same *tier intent* (none at `easy`/`hard`, "lots" at `crazy`, "tons" at `impossible`) but the exact counts are tuning work for the architect/UX, not something to hard-code here.
+- **Field layout, letter density, and reachability on small screens.** Scattering many letters (plus decoys at `crazy`/`impossible`) on a phone-sized field, with a draggable growing trail, raises real ergonomics and hit-target questions for 6–9-year-old hands. This is UX's to design and the architect's to sanity-check for feasibility on the target devices.
+- **Does the trail's own body become an obstacle?** As the trail grows, can it overlap or block access to yet-uncollected letters, and is that intended difficulty or an annoyance to avoid? Flagged for UX.
+
+#### Depends On
+
+The existing Home-screen four-mode selector and `game-modes.ts` (`easy`/`hard`/`crazy`/`impossible` + `GAME_MODE_CONFIG`), and the word-reveal/session flow Honey Pot Flick already uses. Independent of Epics 15 and 16 in the sense that this epic can be built and reviewed first, but the mode is not shippable to children until Epic 15's scoring/mistake handling lands (a collect-in-order game with no consequence for a wrong pickup is incomplete).
+
+---
+
+### Epic 15 — Bee Line: Running Score and Mistake-Handling Model
+
+#### Objective
+
+Define how Bee Line scores a word attempt and how it responds to the two kinds of mistake the collect-in-order mechanic makes possible. This is a **deliberate departure from Honey Pot Flick's scoring model** and product wants that difference made explicit for the architect, because it changes an assumption baked into game #1.
+
+#### User Story
+
+As a child, I want every letter I collect to count, and I want a clear, fair, silly consequence when I grab the wrong letter or grab a letter out of order — so the game feels responsive and stakes-y without feeling punishing.
+
+#### Tasks
+
+- Make score a **running total that can go both up and down within a single word attempt** — every letter the child collects contributes to the score, so the score is an additive/subtractive running value per word attempt, not a monotonic counter.
+- Handle **right letter, wrong order** (the child collects a letter genuinely in the word but not the next one needed): trigger a warning — a sound cue plus visual feedback — and **drop the score**.
+- Handle **wrong letter entirely** (a decoy/non-word letter, at `crazy`/`impossible` where decoys exist): **scatter all collected letters** (destroy the in-progress trail), require the child to **restart the word from the beginning**, and **drop the score**.
+- Keep the score-and-mistake behavior consistent with the product's "silly, recoverable, not punitive" tone — a mistake should read as a fun setback the child immediately understands, not a scary failure (match the tone precedent set by Epic 10.5's honey-steal mechanic).
+
+#### Scoring Model — Explicit Difference From Honey Pot Flick (architect, read this)
+
+- **Honey Pot Flick's score is monotonically increasing** — it only ever goes up as the child succeeds.
+- **Bee Line's score must be able to drop mid-word.** The founder specifically wants "every letter they add" to contribute to score *so that* the score is capable of dropping when a later mistake happens. This is a real product/architecture difference worth the architect's attention — Bee Line needs an additive/subtractive running score per word attempt, which may not fit whatever assumption game #1's scoring code makes about scores only rising. Product is flagging the *requirement* (score goes up and down within an attempt); the architect owns how that reconciles with the shared score/mastery data model.
+- **Mastery/progress data is a separate concern from this running score.** Product's steer (for the architect to confirm): the up-and-down running score is an in-game feel mechanic; it should not corrupt the spelling-accuracy/mastery data parents see, the same separation Epic 10.5 kept between the cosmetic `honeyStash` and real progress data. Whether the running score is purely cosmetic or also feeds a per-session total is a question for the architect — but it must not distort mastery truth.
+
+#### Open Questions for UX/Architecture Review
+
+- **On a right-letter-wrong-order pickup, does the in-progress trail break/reset, or does it stay intact while that pickup simply doesn't count toward progress?** The founder did **not** specify this and it is a genuine design fork. Do **not** assume an answer. Two readings are both plausible: (a) the wrong-order letter is rejected, the trail continues, only the score dips; or (b) the wrong-order pickup partially or fully breaks the chain like a wrong letter does. This needs a UX/architecture decision — it materially changes how forgiving the mid-tier feels for a 7–8-year-old.
+- **Relative size of the two penalties.** The founder did not specify whether the "wrong letter entirely" penalty should be larger than the "right letter, wrong order" penalty. Product's *suggested* assumption (not a locked number): the wrong-letter penalty should be the larger of the two, because it's the more disruptive/costly mistake (it scatters the whole trail and forces a restart), whereas a wrong-order pickup is a smaller slip. But the actual numbers are tuning work for later — do not hard-code a value here; this is flagged for UX/architecture to set once the mechanic is playable.
+- **How does `easy`'s tap-in-order mode score, given it has no chain and no decoys?** `easy` has no decoys (so no "wrong letter entirely" case) and no trail to scatter, but it should still track correctness/score sensibly. Exactly how `easy` participates in this running-score model — e.g. does a wrong-order tap still dip the score and cue a warning, with no scatter since there's no chain — is for the architect/UX designer to confirm. Product's steer: `easy` should feel consistent with the higher tiers' fairness, just gentler.
+- **Do villains/Mama Bear react to these mistakes (and to a completed word)?** Bee Line mistakes are the natural analog of a Honey Pot Flick miss, which already drives villain `Challenging`/`BeingNaughty` reactions and, at higher tiers, a honey-steal attempt (Epic 10.5). Whether a wrong-order or wrong-letter mistake in Bee Line should trigger the same villain reactions — and whether a completed word triggers Mama Bear's celebration the same way — touches the shared `CharacterAnimationState` contract and the villain-behavior/tier model, so it is the architect's to extend and UX's to stage. Flagged, not decided here.
+
+#### Depends On
+
+Epic 14 (the collect-in-order mechanic and its per-tier decoy/trail behavior must exist before there's anything to score or penalize).
+
+---
+
+### Epic 16 — Bee Line: `impossible`-Tier Time Pressure and Explosion Moment
+
+#### Objective
+
+Deliver the `impossible`-tier (Relentless, ≈9-year-olds) escalation for Bee Line: a hard, word-length-scaled time limit with accelerating music, and a deliberately fun, visceral letter-trail explosion when the timer runs out. This is the top of Bee Line's age curve and must read as exciting, never punishing.
+
+#### User Story
+
+As a confident 9-year-old, I want a real race-against-the-clock version where the music speeds up and my letter trail dramatically explodes if I run out of time — so the hardest mode feels thrilling and re-playable, not stressful or discouraging.
+
+#### Tasks
+
+- Layer a **hard time limit** onto the `impossible`-tier Bee Line attempt (which already has decoys + randomized positions from Epic 14): the child must fully spell the word before time runs out.
+- Scale the time budget to **word length** — longer words get proportionally more time, not a flat timer for every word.
+- Play **fast-tempo music that progressively speeds up** over the course of the attempt, building tension toward the deadline.
+- On timeout (word not completed in time), trigger the **letter-trail explosion**: the collected trail bursts apart in a "really fun, visceral" way, and the child **restarts that word from scratch**.
+- Keep the explosion/failure moment squarely in the product's "silly, recoverable, not punitive" tone — see the Tone Requirement below.
+
+#### Acceptance Criteria
+
+- At `impossible`, an on-screen time budget is visible/felt and counts down over the attempt.
+- The time budget is a function of the number of letters in the target word (a 3-letter word gets less time than an 8-letter word), not a fixed constant.
+- Background music is fast-tempo and audibly accelerates as the deadline approaches.
+- Completing the word before the timer expires resolves the word successfully (handing off to the normal completion flow).
+- Failing to complete before the timer expires triggers the letter-trail explosion and restarts the same word from the beginning.
+- The explosion reads as a fun, exciting "boom," not a scary or shaming failure state (verified against the tone precedent below).
+
+#### Tone Requirement (stated explicitly by the founder — do not soften into "punishing")
+
+The timeout explosion (the trail bursting apart) must read as **fun and visceral/exciting**, not punishing, scary, or discouraging for a 6–9-year-old. This is consistent with the product's established "silly, recoverable, not punitive" failure tone — match the house style precedent set by Epic 10.5's honey-pot-steal mechanic (`docs-private/mama-bears-spelling-bee-architecture.md`, Section 25.11.5, "Consequences and Comeback / Tone Safeguards"): failure is a comedic beat with an immediate, obvious path to try again, and Mama Bear reacts with playful exasperation rather than distress. UX owns the exact art/audio staging of the explosion; product's non-negotiable is only the *emotional read* — the child should want to hit "try again," not feel told off.
+
+#### Open Questions for UX/Architecture Review
+
+- **Exact time-per-letter formula and floor/ceiling.** "Proportional to word length" sets the shape; the actual seconds-per-letter, any minimum time for very short words, and any cap for very long words are tuning work for the architect/UX once the mode is playable — not hard-coded here.
+- **Music acceleration curve and its relationship to the audio system.** How fast the music ramps, and how the accelerating-music requirement fits the existing audio architecture (TTS via `speech-service.ts` and the pre-recorded clip path from Epic 11), is the architect's to design. Product only specifies "fast and progressively speeding up."
+- **Does a villain react to the timeout explosion?** A Honey Pot Flick miss already drives villain reactions and steal attempts (Epic 10.5). Whether the `impossible` timeout explosion should get a gleeful villain reaction (and whether that would over-punish the tone, i.e. the child both loses the word *and* gets taunted) is a UX/architecture question touching the `CharacterAnimationState` contract — flagged, not decided. Product's lean: if a villain reacts, keep it in the "silly rivalry" register (a cheeky cackle), never a "you failed" register.
+- **Is the timer purely `impossible`-tier, or does any lighter time pressure exist below it?** The founder scoped the hard timer to `impossible` only. Confirming no timer leaks into `crazy` (which stays challenging via decoys + randomized-ish layout but not a clock) keeps the age-band contract intact — flagged for confirmation.
+
+#### Depends On
+
+Epic 14 (the `impossible`-tier decoy + randomized-position base) and Epic 15 (the mistake/restart model the explosion's "restart the word from scratch" outcome plugs into). Benefits from the audio work in Epic 11 being in place for the accelerating-music requirement.
+
+---
+
+### Epic 17 — Daily Streaks and the Silly Sticker Album
+
+#### Objective
+
+Deliver Phase 2's daily-engagement reward loop: a persistent, cross-session **sticker album** the child fills by playing on consecutive days, themed around collecting honey pots and bees as silly digital stickers. The loop must give a 6–9-year-old a warm reason to come back tomorrow, in a tone that is funny and non-punishing about missed days.
+
+#### User Story
+
+As a child aged 6–9, I want to earn a new silly sticker for my album each day I play and keep a streak going — so I have a fun reason to come back, and a growing collection I'm proud of.
+
+#### Tasks
+
+- Define the **earn trigger** for a sticker: product's recommended default (open to UX) is that a sticker is awarded on the child's **first completed play session of a calendar day** — completing at least one word/round, not merely opening the app — so the reward rewards *playing*, not just launching. See the open question on trigger choice.
+- Track a **daily streak** (consecutive days with a completed session) and surface it to the child in an encouraging, low-pressure way.
+- Make missed-day handling **non-punishing**, consistent with this product's "recoverable, not punitive" tone (see the streak-mechanics section below) — a missed day should not feel like a harsh reset that discourages a 7-year-old from coming back.
+- Build the **sticker album** as a persistent, cross-session/day-over-day collection the child can browse — stickers earned accumulate and stay collected across sessions and app restarts.
+- Add **streak-milestone moments** (e.g. a special/rarer sticker at a few-day streak) so the loop has small peaks to aim for, not just a flat daily drip.
+- Keep the whole loop in a **silly, funny** register — the stickers, the streak celebration, and the milestone moments should all read as playful, matching the Mama Bear world.
+
+#### Streak Mechanics — Product Steer (age-appropriate, non-punitive)
+
+Consistent with the product's established "recoverable, not punitive" tone, product's recommendation (for UX to confirm/adjust) is **not** a hard reset-to-zero on a single missed day:
+
+- Prefer a gentle model — for example a **streak-freeze / grace day** (one missed day is forgiven, perhaps themed as a bee "having a nap" or Mama Bear "keeping your honey warm"), or a streak that decays gently rather than snapping to zero.
+- The emotional goal: a child who misses a day should feel invited back, not penalized. A punishing reset that makes a 7-year-old feel they "lost everything" is exactly the tone this product avoids.
+- The exact grace-period length and decay behavior are tuning/UX decisions, not locked here — the locked product requirement is only "non-punishing about missed days."
+
+#### Relationship to Epic 10.5's `honeyStash` — a distinction the architect must keep (do not conflate)
+
+The sticker album is a **different system** from Epic 10.5's `honeyStash`, and product is flagging this explicitly so the two are not merged:
+
+- **`honeyStash` (Epic 10.5, in `session-store.ts`)** is a **single-session, in-fiction currency** — "honey pots collected this session" — already fully scoped to the villain steal/defend/recover mechanic, and deliberately kept separate from `score`/mastery data. It resets each session and is owned entirely by the steal mechanic.
+- **The sticker album (this epic)** is a **cross-session/day-over-day persistent collection** driven by daily engagement, not by in-session honey-steal events.
+
+These are two different concerns — a session-local villain-mechanic currency vs. a persistent daily-reward collection — and must not be conflated or made to share state just because both are honey/bee-themed. Do not touch `honeyStash` for this work. The architect owns where the persistent album/streak state actually lives (it is clearly *not* session-store), but product is drawing the boundary here so the two systems don't get merged by accident.
+
+#### Illustrative Silly Sticker Ideas (suggestions for the UX designer, not locked)
+
+These are illustrative to give the UX designer something concrete to react to — **not** locked content decisions:
+
+- **Named silly bee characters** with funny personalities — e.g. "Sir Buzzworth," "Queen Bee-atrice," "Bumble the Clumsy," "Nervous Nigel the Wasp-Who-Insists-He's-A-Bee."
+- **Rarity/variety tiers** — common everyday bees/pots, plus rarer "golden honey pot" or "royal bee" stickers reserved for streak milestones, so a longer streak yields a more special sticker.
+- **Silly honey-pot stickers** — a honey pot wearing sunglasses, an over-full pot dripping everywhere, a tiny pot labeled "extra sticky."
+- **Seasonal/occasional stickers** — a holiday bee, a rainy-day bee with a tiny umbrella — as an optional way to keep the collection feeling fresh over months (which also supports Phase 3's longer-term retention goals).
+- **Duplicate handling** as a silly beat rather than a dead end — e.g. a duplicate becomes a "twin bees" gag — is a UX call worth considering, flagged rather than specified.
+
+#### Open Questions for UX/Architecture Review
+
+- **Exact earn trigger.** Product recommends "first completed session of the day." Alternatives the UX designer should weigh: pure daily login (rewards showing up, not playing — weaker for a learning product), or gating some stickers behind longer streaks only. The choice affects how much the loop rewards genuine practice vs. mere app-opens.
+- **Streak grace/freeze specifics.** Grace-day length, decay behavior, and how the streak is themed/visualized are UX's to design within the "non-punishing" constraint above.
+- **Album size, pacing, and "completion."** How many stickers exist, how fast they're earned, and whether the album is ever "finished" (or refreshes seasonally) affects long-term retention and is a UX/content decision, with an eye toward Phase 3's longer-term-use goals.
+- **Where the persistent album/streak state lives and how it survives reinstalls.** Explicitly the architect's call — flagged only to reinforce that it is *not* `session-store.ts`/`honeyStash`, and to raise whether a missed-day calculation needs to be robust to device clock changes / timezone travel for a kids' app (a real edge case worth the architect's attention, not a product decision).
+- **Per-child vs. per-device.** With multiple child profiles (Epic 1), is the album per-child? Product's lean is yes (each child owns their own collection and streak), but flagged for confirmation since it affects the data model.
+
+#### Depends On
+
+The completed-session signal from the core gameplay loop (Honey Pot Flick today, plus Bee Line once Epics 14–16 land) to know a day's play counts, and the child-profile flow (Epic 1) if the album is per-child. Independent of Epics 14–16 in that it can be built against Honey Pot Flick alone and automatically extends to Bee Line once that mode exists.
+
+---
+
+## 12. Epics 18–26 — Engineering Breakdown of Phase 2 (Bee Line and Daily Rewards)
+
+Epics 14–17 (Section 11) captured product intent for Phase 2 and were reviewed and answered by UX (`docs-private/mama-bears-spelling-bee-ux.md`, Section 13, Steps 13–22) and architecture (`docs-private/mama-bears-spelling-bee-architecture.md`, Sections 26–27). This section is the third and final layer: the buildable, sequenced engineering epics underneath that product+UX+architecture stack, at the same file-level task granularity Epics 8–12 used to turn Section 25's animation architecture into real work. Nothing here re-opens a product or UX decision — where product/UX/architecture left a question genuinely open (a tuning number, an unratified fork), it is carried forward explicitly on the relevant epic below rather than quietly resolved.
+
+**A judgment call on epic boundaries, flagged up front rather than buried in one epic's own notes:** Architecture Section 26.10's own "Suggested Engineering Next Steps" lists six ordered steps for Bee Line, and Section 27.9 lists six more for daily rewards. Rather than mirroring those step lists 1:1 into exactly six-plus-six epics, or collapsing all of Section 26 into one "build Bee Line" epic, this breakdown does two things differently, both judgment calls:
+
+1. **26.10's step 1 (pure module) is split into two epics here, not one.** The architecture doc's own step 1 bundles the field/collection model *and* the running-score model (`applyScore`) into a single suggested step. This breakdown keeps them as two separate epics (18 and 20) instead, because the roadmap's own product-level epics (14 vs. 15) already drew that exact line — the running score is called out in Epic 15 as "a deliberate departure from Honey Pot Flick's scoring model" with its own dedicated open questions (the wrong-order chain fork, penalty ratios). Splitting them lets each stay independently reviewable at the size Epic 8/Epic 10 set as this project's precedent, and mirrors the sequencing note in Section 11: "the running-score epic in principle [is independent] but the mode is not shippable without scoring."
+2. **26.10's step 2 (the screen) is its own epic (19), not folded into step 1's epic (18).** This repeats the exact Epic 8 → Epic 10 precedent from the animation system: Epic 8 shipped a pure, art/screen-agnostic data model first and Epic 10 wired it into a real screen second. Doing the same for Bee Line's second gameplay mode keeps the first deliverable pure-logic, unit-testable off-React, and reviewable without needing a running app — the same reason Epic 8 was scoped that way.
+
+The result is nine epics: six for Bee Line (18–19 core mechanic and screen, 20 scoring/mistakes, 21 decoys, 22 the standalone `GameMusicService`, 23 the `impossible` timer/explosion, 24 character staging) and two for daily rewards (25 persistence foundation, 26 badge/album UI) — plus 22 and 25 are independent infrastructure buildable in parallel with the rest. Every epic below cites the specific architecture subsection(s) and UX step(s) it is built from; read those alongside each epic rather than re-deriving intent from this summary.
+
+---
+
+### Epic 18 — Bee Line: Field/Letter Data Model and the Collect-in-Order State Machine
+
+#### Objective
+
+Build the pure, RN-independent foundation the rest of Bee Line depends on: the per-mode config scaffold, the scattered-field/letter data model (with decoy and position-randomization support built into the shape from day one, even though no tier turns decoys on yet), and the `resolvePickup` collect-in-order state machine. This is the Bee Line analog of Epic 8 — art/screen-agnostic, testable off-React, built before anything renders — and follows the same "pure logic in a sibling module, unit-tested with an injectable RNG" convention `honey-pot-flick.ts` and `steal-attempt.ts` already established (architecture Sections 26.2–26.5).
+
+#### User Story
+
+As an engineer, I want a typed, pure Bee Line field/letter/collection model so that screen code (Epic 19) can ask "was this pickup correct, wrong-order, or wrong-letter?" and "what does the field look like right now?" without any of that logic living inside a React component.
+
+#### Tasks
+
+- Add `src/features/play/logic/bee-line.ts` (sibling to `honey-pot-flick.ts` and `game-modes.ts`, per architecture 26.2/26.10 step 1):
+  - `BeeLineInput` (`'tap' | 'drag'`) and `BeeLineModeConfig` / `BEE_LINE_MODE_CONFIG: Record<GameMode, BeeLineModeConfig>`, extending the `GAME_MODE_CONFIG` pattern as its **own** config object (architecture 26.3) rather than adding fields onto `GameModeConfig`. Populate `input`/`showTowedTrail` for all four tiers now (`tap` + no towed trail at `easy`; `drag` + towed trail at `hard`+, per roadmap Epic 14's acceptance criteria). Leave `decoyLetterCount: 0` and `randomizePositionsPerAttempt: false` at every tier, and `timer`/`music` `undefined` everywhere — those fields exist on the type so Epics 21/23 need zero redesign, but this epic does not populate them.
+  - `LetterTileKind`, `ScatteredLetter`, `BeeLineField`, and the pure `buildBeeLineField(word, decoyCount, field, options?)` builder (architecture 26.4), reusing `Point`/`Bounds`/`shuffleLetters` from `honey-pot-flick.ts` and a `DECOY_LETTER_POOL`-style pool for decoy letters. Repeated letters (e.g. "bee") get one tile per occurrence via `orderIndex`. Accepts an injectable `random` function (mirroring `villain-pool.ts`'s injected-RNG convention) so placement is deterministic and testable.
+  - `CollectionOutcome`, `ChainPolicy`, `BeeLineTuning`, `CollectionState`, and the pure reducer `resolvePickup(state, tile, tuning)` (architecture 26.5) — no score math inside it; scoring is Epic 20's concern, kept deliberately separate per 26.5's own instruction.
+  - `DEFAULT_BEE_LINE_TUNING` following UX Step 18's *recommendation* (`wrongOrderPolicy: 'keep-chain'`, `wrongLetterPolicy: 'break-chain'`) as the launch default — implemented as the tunable parameter architecture 26.5 designed for, not hard-coded as if product had ratified it (see Open Questions).
+- Add `src/features/play/logic/bee-line.test.ts` under the existing `node --import tsx --test` setup: field tiles never overlap within `minTileSpacingPx`; decoy tiles are structurally indistinguishable from correct tiles except `kind`/`orderIndex`; a repeated-letter word produces one tile per occurrence with the right `orderIndex`s; `resolvePickup` correctly classifies `correct`/`wrong-order`/`wrong-letter`; both `ChainPolicy` values behave as documented; and `easy` (no decoys, `keep-chain`) never produces a `chainBroke: true` outcome.
+- Add a short module-level doc comment on `bee-line.ts` cross-referencing `docs-private/mama-bears-spelling-bee-architecture.md` Section 26, the way `steal-attempt.ts` cross-references Section 25.11.
+
+#### Open Questions / Tuning Carried Forward (Not Resolved by This Epic)
+
+- **Wrong-order chain-break fork** (roadmap Epic 15; architecture 26.11). `wrongOrderPolicy` defaults to `'keep-chain'` per UX Step 18's recommendation; product has not ratified it. Flipping `DEFAULT_BEE_LINE_TUNING.wrongOrderPolicy` to `'break-chain'` is a one-line, no-redesign change if product decides otherwise — that is the entire point of it being a tuning value here rather than a structural choice.
+- **Decoy counts per tier and field density/reachability on small screens** (roadmap Epic 14; architecture 26.11). `decoyLetterCount` is `0` everywhere in this epic's config; real numbers are Epic 21's tuning work, not this epic's.
+- **Whether `easy` shows the faint static trail-preview dotted line in the "word so far" strip** (UX Step 14) is a screen-layer (Epic 19) concern, not this epic's.
+
+#### Depends On
+
+Nothing — foundational, can start immediately, the same way Epic 8 was the animation system's foundation. Reads `GameMode` from the existing `game-modes.ts` and `Point`/`Bounds`/`shuffleLetters` from the existing `honey-pot-flick.ts`, both read-only.
+
+#### Revised: Implemented
+
+All three tasks above are built and verified. What actually landed:
+
+- **`src/features/play/logic/bee-line.ts`**: `BeeLineInput`, `BeeLineModeConfig` (including the `timer`/`music` fields that stay `undefined` until Epics 21/23 populate them), `BEE_LINE_MODE_CONFIG` (tap/no-trail at `easy`, drag/trail at `hard`+, `decoyLetterCount: 0` and `randomizePositionsPerAttempt: false` everywhere per this epic's own scope); `LetterTileKind`, `ScatteredLetter`, `BeeLineField`, and `buildBeeLineField(word, decoyCount, field, options?)`; `CollectionOutcome`, `ChainPolicy`, `BeeLineTuning`, `DEFAULT_BEE_LINE_TUNING`, `CollectionState`, `createCollectionState`, and the pure reducer `resolvePickup(state, tile, tuning)`. A module-level doc comment cross-references architecture Section 26, matching `steal-attempt.ts`'s citation style.
+- **Field placement algorithm**: `buildBeeLineField` places each tile (word letters first, then decoys) via rejection sampling — up to 200 random-position attempts per tile against a `minTileSpacingPx` (default 64px, matching the default tile size) exclusion radius from every already-placed tile, falling back to the last attempted position rather than looping forever if the field is too crowded. This satisfies architecture 26.4's "no tile overlaps or hides another" requirement without needing a full Poisson-disc implementation, which would have been more machinery than a phone-sized field with a handful of tiles warrants.
+- **Repeated letters**: each occurrence of a letter (e.g. "bee") gets its own tile with its own `orderIndex`, exactly per architecture 26.4 — verified directly in `bee-line.test.ts`.
+- **`resolvePickup` contract**: classifies a pickup as `correct` (tile's `orderIndex` matches `nextExpectedIndex`), `wrong-order` (a `correct`-kind tile whose `orderIndex` doesn't match), or `wrong-letter` (any `decoy`-kind tile), then applies the relevant `ChainPolicy` (`keep-chain` leaves `next` untouched aside from the outcome; `break-chain` empties `collected`/resets `nextExpectedIndex` to 0 and sets `chainIntact: false`). No score math lives in this function, per architecture 26.5's explicit instruction that classification and scoring be tunable independently (Epic 20's job).
+- **`easy`'s participation** is enforced by construction, not a special case: because `BEE_LINE_MODE_CONFIG.easy.decoyLetterCount` is `0`, a real `easy` field never contains a `decoy`-kind tile, so `resolvePickup` can only ever be called with `correct`-kind tiles there and can only return `correct`/`wrong-order` — never `wrong-letter`, never `chainBroke: true`. `bee-line.test.ts` verifies this directly by driving a full `easy`-shaped word (no decoy tiles constructed at all) through both an out-of-order pickup and a full correct completion.
+- **One addition beyond the architecture doc's literal type sketch, flagged as a judgment call**: architecture 26.5 documents `chainIntact: false` as "the frame a chain break is being animated," which implies something has to flip it back once that animation finishes, but doesn't specify what. Rather than leaving that undefined or silently deciding the reducer resets `chainIntact` to `true` immediately (which would make the field meaningless), a small additional pure function, `acknowledgeChainBreak(state)`, was added: a no-op when the chain is already intact, otherwise flips `chainIntact` back to `true`. This mirrors the "host owns real timing, pure module exposes a resolve step" pattern `steal-attempt.ts` already established for `resolveStealWindUp`, and gives Epic 19's screen code an explicit hook to call once its scatter animation completes, rather than inventing that lifecycle ad hoc when the screen gets built.
+- **`shuffleLetters` in `honey-pot-flick.ts` gained an injectable `random` parameter** (defaulting to `Math.random`, so every existing call site is unaffected): it was previously hard-wired to `Math.random()` internally, which made `buildBeeLineField`'s decoy-selection step non-deterministic even when a `random` function was passed in for tile placement. This is a minimal, additive, non-breaking change to existing behavior, made because architecture 26.4 explicitly calls for reusing `shuffleLetters` for decoy selection and 26.2 calls for the whole module to be "unit-testable with an injectable RNG" — without this fix, that requirement couldn't actually be met for the decoy-selection path. `DECOY_LETTER_POOL` was also changed from a private `const` to an `export const` in the same file, per architecture 26.2's explicit instruction to reuse it rather than duplicate a second decoy-letter list.
+- **Regression-verified**: `npm test` passes 72/72 (21 new tests in `bee-line.test.ts` covering `BEE_LINE_MODE_CONFIG`'s shape, field generation — correct-letter ordering, repeated-letter handling, decoy count/exclusion, minimum spacing, field-bounds containment, RNG determinism — `resolvePickup`'s three-way classification, both `ChainPolicy` values, `easy`'s scatter-proof guarantee, and `acknowledgeChainBreak`; no regressions in the pre-existing 51), `tsc --noEmit` is clean, and `npx expo export --platform web` builds successfully (2.13 MB web bundle, unchanged — expected, since this epic touches no screen/UI code and adds no new assets). `expo start --web` was started and both `/` and `/play` returned HTTP 200 with no console errors in the Metro log; there is nothing to visually check for this epic specifically, since it adds zero rendered UI — `bee-line.ts` is not imported from any screen yet (that wiring starts in Epic 19).
+
+---
+
+### Epic 19 — Bee Line: Screen and Input — Tap-to-Collect (`easy`) and Drag-to-Collect with a Growing Trail (`hard`)
+
+#### Objective
+
+Build the actual playable Bee Line screen consuming Epic 18's pure module: the Home-screen game-picker row (UX Step 13), and the `easy` tap and `hard` drag-and-tow interactions (roadmap Epic 14's `easy`/`hard` acceptance criteria; UX Steps 14–15). This is the Bee Line analog of Epic 10 — wiring a data model that already exists into a real, playable screen.
+
+#### User Story
+
+As a child aged 6–7, I want to see Bee Line as a second game I can pick from Home, and to collect its letters by tapping (or, once I'm a bit older, dragging them into a growing trail behind a little bee) in the right spelling order.
+
+#### Tasks
+
+- Add the "Choose your game" pill row to `HomeScreen.tsx`, above the existing mode row (UX Step 13): one pill per game (`🍯 Honey Pot Flick`, `🐝 Bee Line`), using `secondary` (Blue Violet) as the selected-game color so it reads as visually distinct from the `primary`-colored mode row below it. Persist the selected game the same way `game-mode-store.ts` persists mode (a small sibling store, or an added field on that store — implementer's call at build time, flagged as a small open decision rather than prescribed here).
+- Add `src/features/play/screens/BeeLineScreen.tsx` (sibling to `PlayScreen.tsx`) and a new Expo Router route (e.g. `app/bee-line.tsx`) that Home's Play button routes to when Bee Line is the selected game.
+- Reuse the existing word-reveal/pronunciation flow (`speech-service.ts`) and the `getNextWord` round-advance helper from `honey-pot-flick.ts`, so a Bee Line session shapes up the same way an HPF session does.
+- Render the scattered field built by `buildBeeLineField` as honeycomb-hex letter tiles (the shared tile art called for across UX Steps 14–16).
+- `easy`: tap-to-collect input calling `resolvePickup` on each tap; a static "word so far" strip at the top of the screen with a faint dotted connector previewing the trail visual (UX Step 14) — no towed-trail motion at this tier.
+- `hard`+: drag-to-collect input with a small bee mascot at the head of a jointed, honeycomb-connector trail that tows collected tiles (UX Step 15). Per architecture 26.4's confirmed feasibility note, implement the trail as a **render-only** layer: collected tiles are removed from the field's hit-testable/gesture-responder set and redrawn as the trail, so the trail is provably never an obstacle to remaining tiles by construction, not by careful z-index tuning alone.
+- Word completion hands off to the same "next word" flow HPF uses. Leave the running score, mistake feedback, decoys, `impossible` timer, and character reactions to Epics 20–24 — this epic treats a fully-collected word as simply "complete," matching how roadmap Epic 14 scoped itself.
+
+#### Open Questions / Tuning Carried Forward
+
+- **Game-pill icon + label vs. icon-only, and total Home-screen scroll height on the smallest supported device** once the new pill row is added (UX Step 13's own flagged assumptions) — needs a real-device check, not assumed here.
+- **Whether the trail's rendering needs a dedicated animation library primitive** (Reanimated shared values driving each trailing tile's position) or can be done with simpler layout animation is an implementation detail to resolve while building, not a product/UX open question — noted here only so it isn't silently assumed trivial.
+
+#### Depends On
+
+Epic 18 (the pure field/collection model this screen consumes). Existing `HomeScreen.tsx`/`game-mode-store.ts` (mode selection) and `speech-service.ts` (word reveal). Not shippable to children alone — there is no mistake consequence yet, mirroring roadmap Epic 14's own "Depends On" framing for Honey Pot Flick's sibling epics.
+
+---
+
+### Epic 20 — Bee Line: Running Score and Mistake-Handling Model
+
+#### Objective
+
+Deliver roadmap Epic 15: an additive/subtractive running score per word attempt (able to dip, including below zero, mid-attempt) that is representationally separate from `session-store.ts`'s monotonic `score` and never touches `progress-store.ts` mastery data, plus the two mistake-feedback treatments UX Step 18 designed (a small wobble+dip for wrong-order, a bigger scatter+restart for wrong-letter).
+
+#### User Story
+
+As a child, I want every letter I collect to count toward a score that can go up or down, and a clear, fair, silly consequence when I grab the wrong letter or grab one out of order — so the game feels responsive and stakes-y without ever feeling punishing.
+
+#### Tasks
+
+- Add `BeeLineScoreTuning`, `BeeLineScoreState`, and the pure `applyScore(state, outcome, tuning)` to `bee-line.ts` (architecture 26.6), keyed off `CollectionOutcome`. Unit test in `bee-line.test.ts`: score rises on `correct`, dips (including going negative) on `wrong-order`/`wrong-letter`, and `wrongLetterPenalty` > `wrongOrderPenalty` under the placeholder tuning below.
+- Add `DEFAULT_BEE_LINE_SCORE_TUNING` with placeholder values (`wrongLetterPenalty` set larger than `wrongOrderPenalty`, per product's stated lean) — explicitly flagged as tuning, not a locked number (see Open Questions).
+- Keep the running score entirely out of the two existing score/mastery contracts: it lives in `BeeLineScreen.tsx`'s own component/logic state (or a small Bee-Line-only slice if a persisted per-session total is later wanted — a **new**, separately-named field, never `session-store.ts`'s `incrementScore`). Word completion still calls `progress-store.ts`'s existing `recordWordCompleted` exactly as Honey Pot Flick does, regardless of what the running score did during the attempt.
+- Wire `resolvePickup`'s `wrong-order` outcome (on `BeeLineScreen.tsx`) to: `applyScore`'s dip, a small floating "-N" near the score, a quick tile wobble + warm-orange outline flash, a short "uh-uh!" sound (not a buzzer), and — per `DEFAULT_BEE_LINE_TUNING.wrongOrderPolicy: 'keep-chain'` from Epic 18 — the trail staying fully intact; the mis-tapped tile just bounces back to its field position, uncollected.
+- Wire `resolvePickup`'s `wrong-letter` outcome to: the bigger score dip, the whole in-progress trail bursting apart in a comedic "sproing/poof" (tiles tumbling back onto the field in new positions), a startled bee "whoa!" headshake reaction (never a sad/scolding animation), and the target word re-displaying so the child can immediately restart the word — no separate confirmation tap.
+- Add a test asserting `easy`'s participation matches architecture 26.5's stated read: since `BEE_LINE_MODE_CONFIG.easy.decoyLetterCount` is 0 (Epic 18), `resolvePickup` can only ever return `correct`/`wrong-order` at `easy` and never `wrong-letter`/`chainBroke: true` — i.e. `easy` only ever sees the gentle wobble+dip, never a scatter.
+
+#### Open Questions / Tuning Carried Forward
+
+- **Exact `perCorrect` / `wrongOrderPenalty` / `wrongLetterPenalty` values** (roadmap Epic 15; architecture 26.11) — placeholder values only; product/UX to set real numbers once the mechanic is playable.
+- **Whether the running score persists as a per-session total anywhere, or is purely cosmetic feel** (architecture 26.6) — not decided here. If it's ever persisted, it must land in a new, separately-named field — never `session-store.ts`'s `score`.
+
+#### Depends On
+
+Epic 18 (`resolvePickup`'s outcome classification and `ChainPolicy`) and Epic 19 (a real screen to wire the score/feedback animations into).
+
+---
+
+### Epic 21 — Bee Line: `crazy`/`impossible` Decoys and Position Randomization
+
+#### Objective
+
+Deliver roadmap Epic 14's `crazy`/`impossible` acceptance criteria — decoy letters mixed onto the field, and, at `impossible` only, tile positions re-randomized on every attempt — per UX Step 16's "decoys are a fair trick, not a visual trap" design intent.
+
+#### User Story
+
+As a child aged 8–9, I want the field to include letters that aren't part of my word, so the challenge comes from knowing how to spell it, not just from finding letters — and at the hardest level, I want the letters to land somewhere new every time I try, so I can't just memorize where they were.
+
+#### Tasks
+
+- Set real `decoyLetterCount` values for `crazy` and `impossible` in `BEE_LINE_MODE_CONFIG` (placeholder tuning numbers, flagged not locked — see Open Questions) and `randomizePositionsPerAttempt: true` at `impossible` only, leaving it `false` everywhere else (keeping `crazy` clock-and-pattern-free per UX Step 17's own "don't let anything leak below `impossible`" concern, applied here to layout memorization rather than the timer).
+- Wire `BeeLineScreen.tsx` to call `buildBeeLineField` once per word at `easy`/`hard`/`crazy` (so a retry reuses the same field) and once per **attempt** at `impossible` (per architecture 26.4: "position randomization is just *when* you call the builder," one code path either way).
+- Render decoy tiles with identical art, size, and color to correct tiles (UX Step 16 — deliberately no color-tell). Confirm the render layer never reads `tile.kind` for styling decisions, only `resolvePickup`'s classification logic does.
+- Add a replayable word-pronunciation control (a small speaker icon, re-triggerable throughout the attempt) at `crazy`+ (UX Step 16), reusing the existing `speech-service.ts` playback.
+- Confirm (via a screen-level check, not a new algorithm) that decoys never spawn overlapping or hiding a correct tile — this is already enforced by `buildBeeLineField`'s `minTileSpacingPx` from Epic 18.
+
+#### Open Questions / Tuning Carried Forward
+
+- **Exact decoy counts per tier** (roadmap Epic 14; architecture 26.11) — UX needs a rough number to wireframe field density; not locked here. Whether Bee Line reuses Honey Pot Flick's `decoyLetterCount` numbers from `game-modes.ts` or takes its own tuning is explicitly still open per the roadmap.
+- **Optional accessibility/assist toggle** highlighting the next correct letter after repeated wrong-letter mistakes on the same word (UX Step 16) — not required for launch; whether it exists at all, and if so default-on/opt-in/parent-controlled, is undecided.
+- **Field density, letter-tile size, and reachability on the smallest supported device** (architecture 26.11) — UX to design, needs a real-device check before this tier ships broadly.
+
+#### Depends On
+
+Epic 18 (the decoy-capable field model) and Epic 20 (the wrong-letter scatter consequence that gives decoys a reason to matter — a decoy with no consequence for touching it is incomplete, mirroring how roadmap Epic 14 itself deferred mistake consequences to Epic 15).
+
+---
+
+### Epic 22 — `GameMusicService`: Looping, Rate-Ramped Background Music Infrastructure
+
+#### Objective
+
+Add the standalone audio infrastructure architecture 26.7 calls for: a persistent, looping background-music player whose playback rate ramps over time — a genuinely different lifecycle from the two existing one-shot audio services (`speech-service.ts`'s single TTS queue, `character-audio-service.ts`'s fire-and-dispose SFX players), neither of which models a long-lived, rate-animated loop.
+
+#### User Story
+
+As an engineer, I want a small, dedicated music service with the same fail-silent, single-shared-instance discipline the existing audio services already follow, so the `impossible`-tier accelerating music (Epic 23) has somewhere correct to live instead of being bolted onto a service built for something else.
+
+#### Tasks
+
+- Add `src/shared/lib/music/game-music-service.ts` (+ `index.ts` barrel, mirroring the shape of `src/shared/lib/character-audio/` and `src/shared/lib/speech/`): a single shared instance owning one looping `expo-audio` `AudioPlayer` (`player.loop = true`) and an animated playback-rate ramp.
+- Define `AcceleratingMusicCue` (`trackId`, `loop: true`, `startRate`, `endRate`, `rampMs`) per architecture 26.7.
+- Expose a small API — `playLoop(cue: AcceleratingMusicCue)`, `stop()`, `stopAll()` — following the existing services' fail-silent discipline (never throws on a missing/failed-to-load track) and explicit `stopAll()`-on-unmount convention.
+- Split the rate-ramp math out as a pure, testable helper (e.g. `resolvePlaybackRateAtElapsedMs(cue, elapsedMs)`) the same way `sprite-animation.ts` keeps frame-index math independent of the Reanimated player — add `game-music-service.test.ts` covering the ramp's start/mid/end values and clamping past `rampMs`.
+- Ship with **zero tracks registered** — same "plumbing before art" precedent as `character-images.ts`/`character-animations.ts` on day one; `playLoop` with an unregistered `trackId` fails silently rather than throwing.
+
+#### Open Questions / Tuning Carried Forward
+
+- **Music acceleration curve, and whether "accelerating" is a `playbackRate` ramp on one stem vs. a crossfade between pre-rendered tempo stems** (architecture 26.7/26.11) — an asset-pipeline call for UX/audio, expressible either way behind the `AcceleratingMusicCue` shape; not decided here.
+
+#### Depends On
+
+Nothing — standalone infrastructure, buildable in parallel with any Bee Line epic, the same way Epic 9's asset-pipeline documentation ran in parallel with Epic 8.
+
+---
+
+### Epic 23 — Bee Line: `impossible`-Tier Timer and the Firework Trail-Explosion
+
+#### Objective
+
+Deliver roadmap Epic 16 and UX Step 17: a word-length-scaled hard time limit at `impossible` only, fast-tempo accelerating music, a fuse/sparkler burn-down visualization (never a numeral-primary countdown), and a firework-style timeout explosion that reads as fun and visceral rather than punishing.
+
+#### User Story
+
+As a confident 9-year-old, I want a real race-against-the-clock version of Bee Line where the music speeds up and my letter trail dramatically explodes like a firework if I run out of time — so the hardest mode feels thrilling and replayable, never stressful.
+
+#### Tasks
+
+- Add `BeeLineTimerConfig` and the pure `computeTimeBudgetMs(wordLength, cfg)` to `bee-line.ts` (architecture 26.7); unit test the floor/ceiling clamping and the proportional-to-word-length shape in `bee-line.test.ts`.
+- Populate `BEE_LINE_MODE_CONFIG.impossible.timer` and `.music` (placeholder tuning values only — see Open Questions); leave both `undefined` at every other tier, keeping `crazy` clock-free per UX Step 17's explicit instruction not to let any lighter timer leak below `impossible`.
+- Render the fuse/sparkler burn-down at the front of the trail on `BeeLineScreen.tsx` (UX Step 17), with an optional small secondary numeral readout — the fuse is the primary read, not the numeral.
+- Wire `GameMusicService.playLoop()` (Epic 22) with the computed time budget driving `rampMs`, so the music's acceleration peaks right at the deadline.
+- On timeout: fire the same trail-scatter transition `resolvePickup`'s `wrong-letter`/`break-chain` path already produces (Epic 20), staged as the bigger, firework-scale burst UX Step 17 calls for — a bright gold/hot-pink particle burst with a "pop-pop-fizzz" sound, deliberately visually distinct from the win-celebration's confetti-shower-from-above (a single big upward "whoosh" from the fuse's origin point vs. confetti falling from above) so a child can tell success from timeout within a second.
+- On timeout, restart the same word from the beginning and stop the music loop; on success before timeout, resolve into the existing word-complete celebration flow (the fuse simply resolves into that same celebration, per UX Step 17 — no separate success language to invent).
+
+#### Open Questions / Tuning Carried Forward
+
+- **Exact `secondsPerLetter` / `floorMs` / `ceilingMs`** (roadmap Epic 16; architecture 26.11) — tuning work once the mode is playable, not hard-coded here.
+- **Whether a villain reacts to the timeout explosion** — deferred to Epic 24; product's lean (if a villain reacts at all) is a gleeful, harmless laugh, never framed as villain-caused.
+
+#### Depends On
+
+Epic 21 (`impossible`'s decoy + randomized-position base must exist first), Epic 20 (the `break-chain` scatter path the explosion reuses, and the restart-from-scratch model), and Epic 22 (`GameMusicService`).
+
+---
+
+### Epic 24 — Bee Line: Character Staging — Mama Bear Reactions and Heckling Villains
+
+#### Objective
+
+Implement UX Step 19's launch staging (architecture 26.8): Mama Bear fully present and reactive, exactly as in Honey Pot Flick; a villain appears at `crazy`/`impossible` only, as a non-mechanical heckling spectator — **no** honey-steal mechanic, no `StealAttemptHost`, no `honeyStash` touch anywhere in Bee Line.
+
+#### User Story
+
+As a child playing Bee Line, I want Mama Bear to feel like the same character I know from Honey Pot Flick, cheering me on and reacting gently to my slips — and if a villain shows up on the harder levels, I want it to just be a funny rival heckling from the sidelines, not another thing trying to beat me.
+
+#### Tasks
+
+- Render `<Character>` instances for Mama Bear and (at `crazy`/`impossible` only) a villain on `BeeLineScreen.tsx`, reusing `useCharacterAnimationState` and `pickNextVillain`/`villain-pool.ts` exactly as `PlayScreen.tsx` already does — no new character-selection logic.
+- Wire Mama Bear: `trigger('Celebrating')` on word completion; a warm, non-scolding reaction on a `wrong-order` mistake, mirroring how she already responds gently to a Honey Pot Flick miss.
+- Add Bee Line's own capability-light `tier -> capabilities` map (architecture 26.8) as a new sibling module, e.g. `src/features/play/logic/bee-line-villain-capabilities.ts`, matching `villain-capabilities.ts`'s existing per-game-data pattern — **`Passive`/`Taunting`: villain absent/idle, no heckle; `Interfering`/`Relentless`: `['Taunt']` only.** No tier lists `StealResource`.
+- Stage the villain's heckle using the existing `Challenging` state (architecture 26.8 option (a): reuse, zero enum change) — deliberately **do not** use the `BeingNaughty` steal-telegraph visual or the larder-directed lunge positioning from Honey Pot Flick's steal mechanic, so an observant child doesn't see a "wind-up" that never pays off. Do not instantiate `StealAttemptHost` or touch `session-store.ts`'s `honeyStash` anywhere in this epic's code.
+- On the `impossible` timeout (Epic 23), an optional villain reaction is a gleeful, harmless laugh only — never staged as though the villain caused the explosion.
+- Gate any villain reaction animation through the existing `useReduceMotion()` hook, consistent with Epic 12's reduce-motion discipline.
+
+#### Open Questions / Tuning Carried Forward
+
+- **Whether `Challenging` reads clearly as "heckling commentary" on real art, or a dedicated `Heckling` `CharacterAnimationState` value is warranted** (architecture 26.8/26.11, option (a) vs. (b)) — this epic implements option (a) for launch (zero contract change); UX to confirm the read once real art exists, with option (b) as a cheap additive upgrade if needed.
+- **Whether villains ever get an active mechanic in Bee Line** — explicitly deferred by UX Step 19, not ruled out. Revisit only after the base mistake/timer tone (Epics 20/23) has been playtested with real kids.
+
+#### Depends On
+
+Epic 19 (a screen to render characters on), Epic 21 (`crazy`/`impossible` decoys, since villains only appear at those tiers), and Epic 23 (the timeout event a villain may optionally react to).
+
+---
+
+### Epic 25 — Daily Streak Persistence Foundation
+
+#### Objective
+
+Deliver architecture Section 27 minus its screens: the pure day-boundary/timezone-robust module, the new `daily-rewards-store.ts`, the `dailyRewardsKey(profileId?)` per-device-today/per-child-ready seam, the sticker catalog registry, and the completed-session earn-trigger signal — wired into Honey Pot Flick's existing completion path today (per architecture 27.6), so this epic does not need to wait on any Bee Line epic above.
+
+#### User Story
+
+As a child aged 6–9, I want the game to quietly notice each day I actually finish playing, so a streak and a sticker collection can start building up behind the scenes for the album screen (Epic 26) to show me.
+
+#### Tasks
+
+- Add a pure day-boundary module (proposed home: alongside the store, or a sibling logic file such as `src/stores/daily-rewards-logic.ts`, matching the project's existing "pure logic beside the store/screen that uses it" convention): `toDayKey(nowMs, tzOffsetMinutes)`, `dayGap(from, to)`, `applyCompletedSession(streak, today, tuning)`, and `dailyRewardsKey(profileId?)` (architecture 27.2/27.5). Unit test under `node --import tsx --test`: same-day replay is a no-op, a consecutive day increments, a gap within grace consumes a grace day and keeps `current`, a gap past grace lapses to a fresh streak (data resets `current` to 1, no punishing zero display), and a clock moved backward (earlier than `lastPlayedDay`) clamps to a no-op rather than incrementing or resetting.
+- Define the data model per architecture 27.3: `DayKey`, `StickerId`/`StickerRarity`/`EarnedSticker`, `DailyStreakState`, `StickerAlbumState`, `DailyRewardsState` (with `schemaVersion` for future migrations, mirroring `progress-store.ts`'s implicit shape versioning).
+- Add `src/stores/daily-rewards-store.ts`: a Zustand store mirroring `progress-store.ts`'s shape (`isHydrated`, `loadDailyRewards()` called once on app startup beside `loadProfile`/`loadProgress`, a `persist()` writing the whole `DailyRewardsState` blob through `dailyRewardsKey()`). This store must never import or mutate `session-store.ts`'s `honeyStash`/`stolenOutstanding`, and never write to any `progress-store.ts` record (architecture 27.4/27.7) — it only *observes* a completed-session signal.
+- Add `recordCompletedPlay(nowMs)` on the store: debounced to once per `DayKey` (first completion of the day calls `applyCompletedSession` and awards a sticker; later completions that day are no-ops for the reward), per architecture 27.6.
+- Wire `recordCompletedPlay` into Honey Pot Flick's existing word-completion path in `PlayScreen.tsx` (the `triggerCelebration()` call site) today. Leave a note at that call site for whoever lands Bee Line's own word-completion handoff (Epics 19/20 above) to add the identical call there once both exist — per architecture 27.6, this is meant to be zero per-game branching, not a second bespoke wiring.
+- Add the sticker catalog registry `src/data/rewards/sticker-catalog.ts` (content-as-data: ids, rarity, silly names/captions, milestone thresholds), mirroring `character-roster.ts`'s registry pattern, seeded with a small placeholder set drawn from the roadmap's own illustrative examples (e.g. "Sir Buzzworth") rather than a locked final catalog.
+
+#### Open Questions / Tuning Carried Forward
+
+- **Per-child vs. per-device** (architecture 27.2 — the real, flagged gap: `profile-store.ts` supports exactly one active profile today, with no profile list anywhere in the codebase). This epic ships per-device today via the `dailyRewardsKey(profileId?)` seam, consistent with how `progress-store.ts` is already per-device. Product's lean is per-child; product to confirm this staging and when real multi-profile support (Epic 1) is scheduled — this epic does **not** attempt to build multi-profile support itself.
+- **Exact earn trigger** — first completed session of the day (recommended default, roadmap Epic 17 / architecture 27.6) vs. app-open vs. gating some stickers behind longer streaks. Implemented per the recommended default; product to confirm.
+- **Grace/freeze length and decay behavior** (roadmap Epic 17; UX Step 22; architecture 27.9/27.10) — a placeholder grace-day count only; the real number and decay shape are tuning/UX decisions.
+- **Album size, earn pacing, and whether the album ever "completes" or refreshes seasonally** (architecture 27.10) — a content/pacing decision the placeholder catalog does not attempt to answer.
+- **Reinstall/multi-device survival is explicitly out of scope for launch.** AsyncStorage survives restarts but not an uninstall/reinstall or a new device; true cross-reinstall persistence needs cloud-backed storage, a Phase 3 follow-up (architecture 27.6), not this epic's job.
+
+#### Depends On
+
+Nothing Bee-Line-related — independent of Epics 18–24, buildable in parallel. Hooks into `PlayScreen.tsx`'s existing Honey Pot Flick completion path, which already exists today.
+
+---
+
+### Epic 26 — Daily Streak Badge and Sticker Album UI
+
+#### Objective
+
+Build the two screens UX designed for the daily-rewards loop (Steps 20–22): a corner-pinned Home-screen streak badge, and a dedicated Sticker Album modal — including the non-punishing "resting bee" grace-day treatment — reading from Epic 25's store.
+
+#### User Story
+
+As a child aged 6–9, I want to glance at Home and instantly see my streak is still going, tap it to open a proud little sticker book, and — if I miss a day — see a sleepy bee taking a nap instead of feeling like I broke something.
+
+#### Tasks
+
+- Add a corner-pinned streak badge to `HomeScreen.tsx` (UX Step 20): `gold`-background badge with a bee/honeycomb icon plus the day count (e.g. "🐝 x5"), absolutely positioned so it adds no scroll height to a screen that already needed a `ScrollView` fix. Reads `daily-rewards-store.ts`'s streak state.
+- Add the grace-day visual swap (UX Step 20/22): on a grace day, the badge swaps to a calm "resting bee + zzz" visual rather than disappearing, changing color to red/alarm styling, or otherwise reading as "something's wrong" — `primary` (Tomato, this app's reserved "wrong/miss" color) must specifically never be used here.
+- Add a Sticker Album screen/modal (e.g. `src/features/rewards/screens/StickerAlbumScreen.tsx`), reached by a single tap on the badge and closed by a single tap back to Home (UX Step 21): a streak-status banner at top; a grid of honeycomb-shaped sticker slots (earned stickers in full color from Epic 25's catalog, not-yet-earned as gray silhouettes in the same hex shape); a `gold` sparkle border + shimmer on milestone stickers; a tap-to-see-caption popup; one large, dominant "Back to Play" button styled like the existing `success`-green Play button family.
+- Wire the grace-day and lapsed-streak copy (UX Step 22): "Bee's taking a little nap — come play today to wake the streak back up!" on a grace day, and a soft "Let's start a fresh streak together!" on an actual lapse — never a visible "Streak: 0" drop-to-zero moment.
+- Confirm total Home-screen scroll height on the smallest supported device now that the badge has been added (should be a non-issue, since it is corner-pinned rather than a new row, but verify per UX Step 13's own precedent of not assuming a `ScrollView` "just handles it").
+
+#### Open Questions / Tuning Carried Forward
+
+- **Optional new "rest" palette tone vs. reusing `muted`/a lightened `secondary`** for the grace-day state (UX Step 22) — flagged as optional by UX, not a locked `theme.ts` addition; this epic may ship with either without blocking on a new color being ratified.
+- **Album size/pacing/"completion"** (carried from Epic 25) — the grid renders whatever the catalog currently contains; it is not designed around a specific final count.
+
+#### Depends On
+
+Epic 25 (the store and sticker catalog this screen reads from).

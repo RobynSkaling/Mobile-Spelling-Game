@@ -9,18 +9,23 @@ export const THROW_DISTANCE = 420;
 export const POT_HIT_RADIUS = 56;
 export const POT_SIZE = 84;
 
-export function shuffleLetters(items: string[]): string[] {
+/** Fisher-Yates shuffle. `random` is injectable (defaults to `Math.random`) so callers that need
+ *  deterministic output for tests — e.g. bee-line.ts's `buildBeeLineField` — can get it without a
+ *  second shuffle implementation. */
+export function shuffleLetters(items: string[], random: () => number = Math.random): string[] {
   const copy = [...items];
 
   for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const swapIndex = Math.floor(random() * (index + 1));
     [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
   }
 
   return copy;
 }
 
-const DECOY_LETTER_POOL = ['b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'm', 'n', 'q', 'r', 'v', 'w', 'x', 'y', 'z'];
+// Exported so other games (e.g. bee-line.ts) can build their own decoy tiles from the same pool
+// rather than maintaining a second, potentially-drifting list of "safe" filler letters.
+export const DECOY_LETTER_POOL = ['b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'm', 'n', 'q', 'r', 'v', 'w', 'x', 'y', 'z'];
 
 /** Builds the shuffled tray of letters for a round: the word's own letters plus `decoyCount` red herrings. */
 export function buildLetterBundle(word: string, decoyCount = 0): string[] {
