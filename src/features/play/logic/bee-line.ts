@@ -11,9 +11,10 @@ import { Bounds, DECOY_LETTER_POOL, Point, shuffleLetters } from './honey-pot-fl
  * Scope note (Epic 18 only): `decoyLetterCount`/`randomizePositionsPerAttempt` are wired but left
  * at their "off" defaults for every tier, and `timer`/`music` are left undefined everywhere —
  * those are Epic 21 (decoys) and Epic 23 (`impossible` timer/music)'s tuning work, not this one's.
- * Score math (`applyScore`) deliberately does not live here — that is Epic 20, kept separate per
- * architecture 26.5's own instruction that mistake CLASSIFICATION and mistake SCORING be tunable
- * independently of one another.
+ * Score math (`applyScore`, Epic 20) does live here, alongside `resolvePickup` — architecture 26.5's
+ * instruction was that mistake CLASSIFICATION and mistake SCORING stay tunable independently of one
+ * another (two separate tuning objects, `BeeLineTuning` vs. `BeeLineScoreTuning`), not that they
+ * live in separate files. `applyScore` never reaches into `resolvePickup`'s internals or vice versa.
  */
 
 export type BeeLineInput = 'tap' | 'drag';
@@ -294,8 +295,9 @@ function applyMistake(
 
 /**
  * Pure transition. Classifies the pickup, applies the tier's ChainPolicy, and reports what the
- * render/score/character layers should react to. No score math here — scoring is Epic 20, kept
- * separate so mistake CLASSIFICATION and mistake SCORING can be tuned independently.
+ * render/score/character layers should react to. No score math in this function itself — `outcome`
+ * is the hand-off to `applyScore` below, so mistake CLASSIFICATION and mistake SCORING stay tunable
+ * independently of one another (two separate tuning objects) even though both live in this file.
  *
  * `easy` participation (roadmap Epic 15's open sub-question, resolved per UX Step 18): `easy` has
  * no decoys (Epic 18's `BEE_LINE_MODE_CONFIG.easy.decoyLetterCount` is 0), so this function can
@@ -344,4 +346,64 @@ export function acknowledgeChainBreak(state: CollectionState): CollectionState {
   }
 
   return { ...state, chainIntact: true };
+}
+
+// ---------------------------------------------------------------------------
+// Running score — additive/subtractive per-attempt "feel" score (architecture 26.6)
+// ---------------------------------------------------------------------------
+
+export type BeeLineScoreTuning = {
+  /** Credit per correctly collected letter. */
+  perCorrect: number;
+  /** Subtracted on a 'wrong-order' outcome. */
+  wrongOrderPenalty: number;
+  /** Subtracted on a 'wrong-letter' outcome. */
+  wrongLetterPenalty: number;
+  /** impossible-tier timeout, if it dips score (architecture 26.7 — Epic 23's concern, not this
+   *  epic's; left undefined/unused here). */
+  timeoutPenalty?: number;
+};
+
+/**
+ * Launch placeholder ONLY — not yet ratified by product (see roadmap Epic 15/20's open question,
+ * mirroring how `DEFAULT_BEE_LINE_TUNING` above is flagged). The one constraint product HAS stated
+ * a lean on is `wrongLetterPenalty` > `wrongOrderPenalty`, since a wrong-letter mistake also scatters
+ * the whole trail — these exact numbers are free to change with zero other code changes once
+ * product/UX sets real values from a playable build.
+ */
+export const DEFAULT_BEE_LINE_SCORE_TUNING: BeeLineScoreTuning = {
+  perCorrect: 10,
+  wrongOrderPenalty: 5,
+  wrongLetterPenalty: 15,
+};
+
+export type BeeLineScoreState = {
+  /** Additive/subtractive running total for the CURRENT word attempt. May be negative mid-attempt.
+   *  A pure in-game FEEL value. NOT session-store.score, NOT a mastery record — see architecture
+   *  26.6's two hard boundaries. Callers reset this to `{ running: 0 }` per word attempt; it is not
+   *  this module's job to decide when that reset happens. */
+  running: number;
+};
+
+/**
+ * Pure additive/subtractive score update, kept deliberately separate from `resolvePickup`'s chain
+ * classification (architecture 26.6): a 'correct' pickup credits `perCorrect`, a 'wrong-order' or
+ * 'wrong-letter' pickup subtracts its respective penalty — including below zero, since the running
+ * score is cosmetic feel for the current attempt, not a floor-clamped total. Never touches
+ * `session-store.ts`'s `score` or `progress-store.ts` mastery data; callers own wiring those
+ * separately (see `BeeLineScreen.tsx`'s `handleWordComplete`).
+ */
+export function applyScore(
+  state: BeeLineScoreState,
+  outcome: CollectionOutcome,
+  tuning: BeeLineScoreTuning,
+): BeeLineScoreState {
+  const delta =
+    outcome === 'correct'
+      ? tuning.perCorrect
+      : outcome === 'wrong-order'
+      ? -tuning.wrongOrderPenalty
+      : -tuning.wrongLetterPenalty;
+
+  return { running: state.running + delta };
 }

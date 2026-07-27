@@ -2,9 +2,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   acknowledgeChainBreak,
+  applyScore,
   BEE_LINE_MODE_CONFIG,
+  BeeLineScoreState,
   buildBeeLineField,
   createCollectionState,
+  DEFAULT_BEE_LINE_SCORE_TUNING,
   DEFAULT_BEE_LINE_TUNING,
   resolvePickup,
   ScatteredLetter,
@@ -261,5 +264,102 @@ describe('acknowledgeChainBreak', () => {
   it('is a no-op when the chain is already intact', () => {
     const state = createCollectionState('cats');
     assert.deepEqual(acknowledgeChainBreak(state), state);
+  });
+});
+
+describe('DEFAULT_BEE_LINE_SCORE_TUNING', () => {
+  it('weighs wrong-letter more heavily than wrong-order, per product\'s stated lean', () => {
+    assert.ok(DEFAULT_BEE_LINE_SCORE_TUNING.wrongLetterPenalty > DEFAULT_BEE_LINE_SCORE_TUNING.wrongOrderPenalty);
+  });
+});
+
+describe('applyScore', () => {
+  function correctTile(letter: string, orderIndex: number): ScatteredLetter {
+    return { id: `correct-${orderIndex}`, letter, kind: 'correct', orderIndex, position: { x: 0, y: 0 } };
+  }
+
+  function decoyTile(letter: string): ScatteredLetter {
+    return { id: `decoy-${letter}`, letter, kind: 'decoy', orderIndex: null, position: { x: 0, y: 0 } };
+  }
+
+  it('starts a fresh attempt at zero', () => {
+    const state: BeeLineScoreState = { running: 0 };
+    assert.equal(state.running, 0);
+  });
+
+  it('credits perCorrect on a correct outcome', () => {
+    const state: BeeLineScoreState = { running: 0 };
+    const next = applyScore(state, 'correct', DEFAULT_BEE_LINE_SCORE_TUNING);
+    assert.equal(next.running, DEFAULT_BEE_LINE_SCORE_TUNING.perCorrect);
+  });
+
+  it('dips by wrongOrderPenalty on a wrong-order outcome', () => {
+    const state: BeeLineScoreState = { running: 20 };
+    const next = applyScore(state, 'wrong-order', DEFAULT_BEE_LINE_SCORE_TUNING);
+    assert.equal(next.running, 20 - DEFAULT_BEE_LINE_SCORE_TUNING.wrongOrderPenalty);
+  });
+
+  it('dips by wrongLetterPenalty on a wrong-letter outcome', () => {
+    const state: BeeLineScoreState = { running: 20 };
+    const next = applyScore(state, 'wrong-letter', DEFAULT_BEE_LINE_SCORE_TUNING);
+    assert.equal(next.running, 20 - DEFAULT_BEE_LINE_SCORE_TUNING.wrongLetterPenalty);
+  });
+
+  it('dips a wrong-letter outcome more than a wrong-order outcome, from the same starting score', () => {
+    const state: BeeLineScoreState = { running: 20 };
+    const afterWrongOrder = applyScore(state, 'wrong-order', DEFAULT_BEE_LINE_SCORE_TUNING);
+    const afterWrongLetter = applyScore(state, 'wrong-letter', DEFAULT_BEE_LINE_SCORE_TUNING);
+    assert.ok(afterWrongLetter.running < afterWrongOrder.running);
+  });
+
+  it('allows the running score to dip below zero mid-attempt', () => {
+    const state: BeeLineScoreState = { running: 5 };
+    const next = applyScore(state, 'wrong-letter', DEFAULT_BEE_LINE_SCORE_TUNING);
+    assert.ok(next.running < 0);
+    assert.equal(next.running, 5 - DEFAULT_BEE_LINE_SCORE_TUNING.wrongLetterPenalty);
+  });
+
+  it('is pure — does not mutate the state passed in', () => {
+    const state: BeeLineScoreState = { running: 10 };
+    applyScore(state, 'wrong-letter', DEFAULT_BEE_LINE_SCORE_TUNING);
+    assert.equal(state.running, 10);
+  });
+
+  it("easy's tier can only ever feed applyScore the gentle wobble+dip treatment, never the scatter dip", () => {
+    // easy ships with decoyLetterCount 0 (BEE_LINE_MODE_CONFIG), so a full easy-tier attempt can
+    // only ever produce 'correct'/'wrong-order' outcomes from resolvePickup — 'wrong-letter' (and
+    // therefore wrongLetterPenalty) is structurally unreachable there. Drive a real attempt through
+    // resolvePickup and confirm the resulting score only ever moves by perCorrect/wrongOrderPenalty.
+    const word = 'cat';
+    let collectionState = createCollectionState(word);
+    let scoreState: BeeLineScoreState = { running: 0 };
+    const tiles = word.split('').map((letter, index) => correctTile(letter, index));
+
+    const mistake = resolvePickup(collectionState, tiles[2], DEFAULT_BEE_LINE_TUNING);
+    assert.equal(mistake.outcome, 'wrong-order');
+    scoreState = applyScore(scoreState, mistake.outcome, DEFAULT_BEE_LINE_SCORE_TUNING);
+    assert.equal(scoreState.running, -DEFAULT_BEE_LINE_SCORE_TUNING.wrongOrderPenalty);
+
+    for (const tile of tiles) {
+      const result = resolvePickup(collectionState, tile, DEFAULT_BEE_LINE_TUNING);
+      assert.notEqual(result.outcome, 'wrong-letter');
+      collectionState = result.next;
+      scoreState = applyScore(scoreState, result.outcome, DEFAULT_BEE_LINE_SCORE_TUNING);
+    }
+
+    assert.equal(collectionState.status, 'complete');
+    const expectedRunning =
+      word.length * DEFAULT_BEE_LINE_SCORE_TUNING.perCorrect - DEFAULT_BEE_LINE_SCORE_TUNING.wrongOrderPenalty;
+    assert.equal(scoreState.running, expectedRunning);
+  });
+
+  it('decoy tiles (only reachable at hard+ once Epic 21 turns decoys on) still classify as wrong-letter for scoring', () => {
+    const state: BeeLineScoreState = { running: 0 };
+    const collectionState = createCollectionState('cat');
+    const result = resolvePickup(collectionState, decoyTile('z'), DEFAULT_BEE_LINE_TUNING);
+    const next = applyScore(state, result.outcome, DEFAULT_BEE_LINE_SCORE_TUNING);
+
+    assert.equal(result.outcome, 'wrong-letter');
+    assert.equal(next.running, -DEFAULT_BEE_LINE_SCORE_TUNING.wrongLetterPenalty);
   });
 });

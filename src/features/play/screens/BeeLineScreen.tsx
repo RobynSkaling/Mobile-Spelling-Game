@@ -8,6 +8,7 @@ import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
 import { speechService } from '@/shared/lib/speech';
+import { soundEffectsService } from '@/shared/lib/sound-effects';
 import { Confetti } from '@/shared/ui/Confetti';
 import { HexTile } from '@/shared/ui/HexTile';
 import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
@@ -15,11 +16,14 @@ import { Bounds, Point, getNextWord, toContainerRelative } from '@/features/play
 import { appendTrailPathPoint, resolveTrailSegmentPositions } from '@/features/play/logic/snake-trail';
 import {
   acknowledgeChainBreak,
+  applyScore,
   BEE_LINE_MODE_CONFIG,
   BeeLineField,
+  BeeLineScoreState,
   buildBeeLineField,
   CollectionState,
   createCollectionState,
+  DEFAULT_BEE_LINE_SCORE_TUNING,
   DEFAULT_BEE_LINE_TUNING,
   resolvePickup,
   ScatteredLetter,
@@ -49,6 +53,26 @@ const NEXT_WORD_DELAY_MS = CELEBRATION_TOTAL_MS + 100;
 // (architecture 26.5's chainIntact:false window) — unreachable today since every tier ships with
 // decoyLetterCount: 0 (Epic 21 turns decoys on), but implemented for correctness regardless.
 const CHAIN_BREAK_HOLD_MS = 450;
+// Epic 20's mistake-feedback timings. The wobble/flash and scatter beats are deliberately short —
+// UX Step 18 wants a quick, silly consequence, not a moment that eats into play time.
+const WOBBLE_DURATION_MS = 320;
+const MISTAKE_OUTLINE_HOLD_MS = 380;
+const SCORE_POPUP_DURATION_MS = 700;
+const BEE_HEADSHAKE_DURATION_MS = 420;
+// The comedic "sproing/poof" scatter burst runs for exactly as long as the field takes to rebuild
+// (CHAIN_BREAK_HOLD_MS), so the snapshot overlay below fades out right as the rebuilt field lands.
+const SCATTER_BURST_DURATION_MS = CHAIN_BREAK_HOLD_MS;
+
+/** A snapshot of the in-progress trail's positions/letters, captured the instant a wrong-letter
+ *  mistake is detected — before `resolvePickup`'s break-chain outcome empties `collectionState`.
+ *  Rendered as its own overlay during the scatter burst so the trail visibly "poofs apart" instead
+ *  of vanishing instantly (the polish gap Epic 19.5 flagged and explicitly deferred to this epic). */
+type ScatterSnapshot = {
+  headPosition: Point;
+  headLetter: string;
+  trailPositions: Point[];
+  trailLetters: string;
+};
 
 export function BeeLineScreen() {
   const [currentWord, setCurrentWord] = useState<string | null>(null);
@@ -66,6 +90,17 @@ export function BeeLineScreen() {
   // doesn't exist yet and the first letter's tile still sits at its own scattered field position.
   const [headPosition, setHeadPosition] = useState<Point | null>(null);
 
+  // Epic 20's running score — additive/subtractive, per-word-attempt "feel" score. Entirely
+  // separate from session-store.ts's monotonic score and progress-store.ts's mastery data (see
+  // bee-line.ts's applyScore doc comment and architecture 26.6's two hard boundaries).
+  const [scoreState, setScoreState] = useState<BeeLineScoreState>({ running: 0 });
+  const [scorePopup, setScorePopup] = useState<{ key: number; delta: number } | null>(null);
+  // The id of the tile that most recently produced a wrong-order mistake, so its wrapper can show
+  // the wobble + warm-orange outline flash; cleared after MISTAKE_OUTLINE_HOLD_MS.
+  const [mistakeTileId, setMistakeTileId] = useState<string | null>(null);
+  // Non-null only during a wrong-letter scatter burst — see ScatterSnapshot's doc comment above.
+  const [scatterSnapshot, setScatterSnapshot] = useState<ScatterSnapshot | null>(null);
+
   const bannerOpacity = useRef(new Animated.Value(0)).current;
   const bannerScale = useRef(new Animated.Value(0.6)).current;
   const celebrationOpacity = useRef(new Animated.Value(0)).current;
@@ -75,6 +110,16 @@ export function BeeLineScreen() {
   const containerRef = useRef<View | null>(null);
   const fieldRef = useRef<View | null>(null);
   const resolvingRef = useRef(false);
+  // -1 -> 0 -> 1 oscillation driving the mis-tapped tile's rotate wobble.
+  const wobbleAnim = useRef(new Animated.Value(0)).current;
+  // 0 -> 1, driving the floating "-N" popup's rise-and-fade.
+  const scorePopupAnim = useRef(new Animated.Value(0)).current;
+  // -1 -> 0 -> 1 oscillation driving the startled bee's headshake during a wrong-letter scatter.
+  const beeShakeAnim = useRef(new Animated.Value(0)).current;
+  // 0 -> 1 over SCATTER_BURST_DURATION_MS, driving the "sproing/poof" burst on `scatterSnapshot`.
+  const scatterAnim = useRef(new Animated.Value(0)).current;
+  const mistakeTileTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scorePopupKeyRef = useRef(0);
   // The head's recorded path history (container-relative points, oldest first, current head
   // position last) — kept in a ref so it can grow every drag frame without forcing a re-render on
   // its own; `headPosition` is the reactive trigger that actually schedules the re-render that
@@ -125,6 +170,63 @@ export function BeeLineScreen() {
     if (currentWord) {
       speechService.speakWord(currentWord);
     }
+  };
+
+  /** Floats a "-N" (or, in principle, "+N") near the score readout and fades it out — UX Step 18's
+   *  small floating delta, anchored to the score display per this epic's task list. */
+  const triggerScorePopup = (delta: number) => {
+    scorePopupKeyRef.current += 1;
+    setScorePopup({ key: scorePopupKeyRef.current, delta });
+    scorePopupAnim.setValue(0);
+    Animated.timing(scorePopupAnim, {
+      toValue: 1,
+      duration: SCORE_POPUP_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setScorePopup(null);
+    });
+  };
+
+  /** A quick tile wobble (UX Step 18's wrong-order treatment) — the mis-tapped tile rocks side to
+   *  side and shows a warm-orange outline flash for MISTAKE_OUTLINE_HOLD_MS, then settles back to
+   *  normal. The tile itself never moves position (it "bounces back to its field position,
+   *  uncollected" simply by staying exactly where it already was — keep-chain never removed it). */
+  const triggerTileWobble = (tileId: string) => {
+    if (mistakeTileTimeoutRef.current) {
+      clearTimeout(mistakeTileTimeoutRef.current);
+    }
+    setMistakeTileId(tileId);
+    wobbleAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(wobbleAnim, { toValue: 1, duration: WOBBLE_DURATION_MS * 0.25, useNativeDriver: true }),
+      Animated.timing(wobbleAnim, { toValue: -1, duration: WOBBLE_DURATION_MS * 0.5, useNativeDriver: true }),
+      Animated.timing(wobbleAnim, { toValue: 0, duration: WOBBLE_DURATION_MS * 0.25, useNativeDriver: true }),
+    ]).start();
+    mistakeTileTimeoutRef.current = setTimeout(() => setMistakeTileId(null), MISTAKE_OUTLINE_HOLD_MS);
+  };
+
+  /** A startled headshake (never a sad/scolding animation, per this epic's explicit instruction) —
+   *  the bee rocks side to side once during a wrong-letter scatter burst. */
+  const triggerBeeHeadshake = () => {
+    beeShakeAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(beeShakeAnim, { toValue: 1, duration: BEE_HEADSHAKE_DURATION_MS * 0.25, useNativeDriver: true }),
+      Animated.timing(beeShakeAnim, { toValue: -1, duration: BEE_HEADSHAKE_DURATION_MS * 0.5, useNativeDriver: true }),
+      Animated.timing(beeShakeAnim, { toValue: 0, duration: BEE_HEADSHAKE_DURATION_MS * 0.25, useNativeDriver: true }),
+    ]).start();
+  };
+
+  /** Drives the "sproing/poof" burst (scale-and-spin-away, fading out) on `scatterSnapshot` over
+   *  SCATTER_BURST_DURATION_MS, timed to finish exactly as the rebuilt field lands. */
+  const triggerScatterBurst = () => {
+    scatterAnim.setValue(0);
+    Animated.timing(scatterAnim, {
+      toValue: 1,
+      duration: SCATTER_BURST_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
   };
 
   const triggerCelebration = () => {
@@ -180,6 +282,9 @@ export function BeeLineScreen() {
     const result = resolvePickup(collectionState, tile, DEFAULT_BEE_LINE_TUNING);
     setCollectionState(result.next);
 
+    const nextScoreState = applyScore(scoreState, result.outcome, DEFAULT_BEE_LINE_SCORE_TUNING);
+    setScoreState(nextScoreState);
+
     if (result.outcome === 'correct') {
       collectedIdsRef.current.add(tile.id);
       setFeedback('Nice! Right letter.');
@@ -190,13 +295,40 @@ export function BeeLineScreen() {
     }
 
     setFeedback(result.outcome === 'wrong-order' ? "Not the next letter yet — try again!" : "That's not it — try again!");
+    triggerScorePopup(nextScoreState.running - scoreState.running);
+
+    if (result.outcome === 'wrong-order') {
+      // 'keep-chain' (this tier's default) leaves the trail fully intact — the mis-tapped tile just
+      // bounces back to its field position, uncollected. Only the wobble/flash/sound treatment fires.
+      triggerTileWobble(tile.id);
+      soundEffectsService.playCue('bee-line-wrong-order');
+    }
+
+    if (result.outcome === 'wrong-letter' && currentWord) {
+      // Snapshot the in-progress trail's current positions/letters before collectionState's reset
+      // (already applied above via setCollectionState) is reflected in the next render, so the
+      // scatter overlay below has something real to burst apart instead of the chain having already
+      // visually vanished (Epic 19.5's flagged "trail vanishes instantly" gap).
+      const preBreakTrailLetters = currentWord.slice(1, collectionState.nextExpectedIndex);
+      const preBreakHeadPosition = headPosition ?? field?.tiles.find((t) => t.orderIndex === 0)?.position ?? null;
+      if (preBreakHeadPosition) {
+        setScatterSnapshot({
+          headPosition: preBreakHeadPosition,
+          headLetter: currentWord[0] ?? '',
+          trailPositions: resolveTrailSegmentPositions(headPathRef.current, preBreakTrailLetters.length, TRAIL_SEGMENT_SPACING_PX),
+          trailLetters: preBreakTrailLetters,
+        });
+      }
+      triggerBeeHeadshake();
+      triggerScatterBurst();
+      soundEffectsService.playCue('bee-line-wrong-letter');
+    }
 
     if (result.chainBroke && field) {
-      // The whole trail scatters back onto the field in new positions (UX Step 18) — Epic 20 owns
-      // the actual scatter animation; this just re-places the tiles and clears the mid-break flag
-      // once the (currently instant) beat is done. The steered head/trail (hard+'s Snake rework)
-      // resets alongside it: a broken chain has no head anymore, so the first letter's tile goes
-      // back to being an ordinary undragged scattered tile once the rebuilt field lands.
+      // The whole trail scatters back onto the field in new positions (UX Step 18). The steered
+      // head/trail (hard+'s Snake rework) resets alongside it: a broken chain has no head anymore,
+      // so the first letter's tile goes back to being an ordinary undragged scattered tile once the
+      // rebuilt field lands.
       resolvingRef.current = true;
       const rebuilt = buildBeeLineField(field.word, modeConfig.decoyLetterCount, fieldBounds!);
       setTimeout(() => {
@@ -205,7 +337,11 @@ export function BeeLineScreen() {
         collectedIdsRef.current = new Set();
         headPathRef.current = [];
         setHeadPosition(null);
+        setScatterSnapshot(null);
         resolvingRef.current = false;
+        // The target word re-displays so the child can immediately restart it — no separate
+        // confirmation tap, the same auto-dismissing banner used for a fresh word.
+        revealWord(rebuilt.word);
       }, CHAIN_BREAK_HOLD_MS);
     }
 
@@ -300,7 +436,11 @@ export function BeeLineScreen() {
       if (bannerTimeoutRef.current) {
         clearTimeout(bannerTimeoutRef.current);
       }
+      if (mistakeTileTimeoutRef.current) {
+        clearTimeout(mistakeTileTimeoutRef.current);
+      }
       speechService.stop();
+      soundEffectsService.stopAll();
     };
   }, []);
 
@@ -322,6 +462,12 @@ export function BeeLineScreen() {
     collectedIdsRef.current = new Set();
     headPathRef.current = [];
     setHeadPosition(null);
+    // The running score is a per-word-attempt "feel" value (architecture 26.6) — a fresh word
+    // starts back at zero, along with any mistake-feedback still mid-animation from the last one.
+    setScoreState({ running: 0 });
+    setScorePopup(null);
+    setMistakeTileId(null);
+    setScatterSnapshot(null);
     revealWord(currentWord);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWord]);
@@ -387,6 +533,18 @@ export function BeeLineScreen() {
         .onUpdate((event) => handleHeadPanUpdate(event.absoluteX, event.absoluteY))
     : null;
 
+  // Wrong-order's tile wobble: a rotate oscillation applied only to the mis-tapped tile's wrapper.
+  const wobbleRotate = wobbleAnim.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-9deg', '0deg', '9deg'] });
+  const mistakeTileStyle = (tileId: string) =>
+    tileId === mistakeTileId ? [styles.mistakeOutline, { transform: [{ rotate: wobbleRotate }] }] : null;
+
+  // Wrong-letter's "sproing/poof" scatter burst: shared scale/rotate/fade applied to every element
+  // of `scatterSnapshot`'s overlay.
+  const scatterOpacity = scatterAnim.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 1, 0] });
+  const scatterScale = scatterAnim.interpolate({ inputRange: [0, 0.35, 1], outputRange: [1, 1.2, 0.2] });
+  const scatterRotate = scatterAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '150deg'] });
+  const beeHeadshakeRotate = beeShakeAnim.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-22deg', '0deg', '22deg'] });
+
   return (
     <View
       ref={containerRef}
@@ -424,6 +582,27 @@ export function BeeLineScreen() {
             </Pressable>
           </View>
 
+          <View style={styles.scoreRow}>
+            <Text testID="bee-line-score" style={styles.scoreText}>Score: {scoreState.running}</Text>
+            {scorePopup ? (
+              <Animated.Text
+                key={scorePopup.key}
+                testID="bee-line-score-popup"
+                style={[
+                  styles.scorePopup,
+                  {
+                    opacity: scorePopupAnim.interpolate({ inputRange: [0, 0.15, 0.75, 1], outputRange: [0, 1, 1, 0] }),
+                    transform: [
+                      { translateY: scorePopupAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -30] }) },
+                    ],
+                  },
+                ]}
+              >
+                {scorePopup.delta > 0 ? `+${scorePopup.delta}` : `${scorePopup.delta}`}
+              </Animated.Text>
+            ) : null}
+          </View>
+
           <View style={styles.wordSoFarRow}>
             {collectedPrefix.split('').map((letter, index) => (
               <React.Fragment key={`${letter}-${index}`}>
@@ -453,7 +632,9 @@ export function BeeLineScreen() {
                       style={[styles.tileWrapper, { left, top }]}
                       onPress={() => handleTilePress(tile)}
                     >
-                      <HexTile letter={tile.letter} size={TILE_SIZE} />
+                      <Animated.View style={mistakeTileStyle(tile.id)}>
+                        <HexTile letter={tile.letter} size={TILE_SIZE} />
+                      </Animated.View>
                     </Pressable>
                   );
                 })
@@ -471,7 +652,9 @@ export function BeeLineScreen() {
                     if (!isDraggable) {
                       return (
                         <View key={tile.id} testID={`bee-line-tile-${tile.id}`} style={[styles.tileWrapper, { left, top }]}>
-                          <HexTile letter={tile.letter} size={TILE_SIZE} />
+                          <Animated.View style={mistakeTileStyle(tile.id)}>
+                            <HexTile letter={tile.letter} size={TILE_SIZE} />
+                          </Animated.View>
                         </View>
                       );
                     }
@@ -484,7 +667,9 @@ export function BeeLineScreen() {
                     return (
                       <GestureDetector key={tile.id} gesture={pan}>
                         <View testID={`bee-line-tile-${tile.id}`} style={[styles.tileWrapper, { left, top }]}>
-                          <HexTile letter={tile.letter} size={TILE_SIZE} />
+                          <Animated.View style={mistakeTileStyle(tile.id)}>
+                            <HexTile letter={tile.letter} size={TILE_SIZE} />
+                          </Animated.View>
                         </View>
                       </GestureDetector>
                     );
@@ -510,8 +695,11 @@ export function BeeLineScreen() {
 
                   {/* The head: the first letter's tile, doubling as the drag handle for the whole
                       chain. Always the same element (never unmounted across the "just a scattered
-                      tile" -> "steering the snake" transition), so an in-flight touch survives it. */}
-                  {headFieldTile && headPan ? (
+                      tile" -> "steering the snake" transition), so an in-flight touch survives it.
+                      Hidden during a wrong-letter scatter burst — `scatterSnapshot`'s overlay below
+                      takes over showing (and animating away) the head for that window instead, so
+                      the two don't visually double up. */}
+                  {headFieldTile && headPan && !scatterSnapshot ? (
                     <GestureDetector gesture={headPan}>
                       <View
                         testID="bee-line-head"
@@ -521,6 +709,69 @@ export function BeeLineScreen() {
                         <HexTile letter={headFieldTile.letter} size={TILE_SIZE} />
                       </View>
                     </GestureDetector>
+                  ) : null}
+
+                  {/* Wrong-letter's "sproing/poof" scatter burst (UX Step 18): the trail's pre-break
+                      snapshot tumbles apart and fades while the startled bee shakes its head, filling
+                      the CHAIN_BREAK_HOLD_MS window during which collectionState has already reset
+                      but the field hasn't rebuilt yet — replacing the "trail vanishes instantly"
+                      gap Epic 19.5 flagged and deferred to this epic. */}
+                  {scatterSnapshot ? (
+                    <View pointerEvents="none">
+                      {scatterSnapshot.trailPositions.map((position, index) => {
+                        const trailLeft = position.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2;
+                        const trailTop = position.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2;
+                        const flingSign = index % 2 === 0 ? 1 : -1;
+
+                        return (
+                          <Animated.View
+                            key={`scatter-trail-${index}`}
+                            style={[
+                              styles.tileWrapper,
+                              {
+                                left: trailLeft,
+                                top: trailTop,
+                                zIndex: 5 + (scatterSnapshot.trailPositions.length - index),
+                                opacity: scatterOpacity,
+                                transform: [
+                                  { scale: scatterScale },
+                                  { rotate: scatterRotate },
+                                  {
+                                    translateX: scatterAnim.interpolate({
+                                      inputRange: [0, 1],
+                                      outputRange: [0, flingSign * (20 + index * 6)],
+                                    }),
+                                  },
+                                  {
+                                    translateY: scatterAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 24 + index * 8] }),
+                                  },
+                                ],
+                              },
+                            ]}
+                          >
+                            <HexTile letter={scatterSnapshot.trailLetters[index]} size={TILE_SIZE} backgroundColor={theme.colors.gold} />
+                          </Animated.View>
+                        );
+                      })}
+
+                      <Animated.View
+                        style={[
+                          styles.tileWrapper,
+                          styles.headWrapper,
+                          {
+                            left: scatterSnapshot.headPosition.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2,
+                            top: scatterSnapshot.headPosition.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2,
+                            opacity: scatterOpacity,
+                            transform: [{ scale: scatterScale }, { rotate: scatterRotate }],
+                          },
+                        ]}
+                      >
+                        <Animated.Text style={[styles.beeRider, { transform: [{ rotate: beeHeadshakeRotate }] }]}>
+                          🐝
+                        </Animated.Text>
+                        <HexTile letter={scatterSnapshot.headLetter} size={TILE_SIZE} />
+                      </Animated.View>
+                    </View>
                   ) : null}
                 </>
               )}
@@ -649,6 +900,32 @@ const styles = StyleSheet.create({
   targetPrompt: {
     marginTop: theme.spacing.xs,
     fontSize: 32,
+  },
+  scoreRow: {
+    marginTop: theme.spacing.sm,
+    alignSelf: 'center',
+    position: 'relative',
+  },
+  scoreText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: theme.colors.text,
+    textAlign: 'center',
+  },
+  scorePopup: {
+    position: 'absolute',
+    top: -6,
+    right: -34,
+    fontSize: 18,
+    fontWeight: '900',
+    // Warm-orange, matching the wobble/flash treatment below — dips are always this color
+    // regardless of which mistake caused them, so the child reads "score went down" at a glance.
+    color: '#FF8C00',
+  },
+  mistakeOutline: {
+    borderWidth: 3,
+    borderColor: '#FF8C00',
+    borderRadius: TILE_SIZE / 2,
   },
   wordSoFarRow: {
     marginTop: theme.spacing.sm,
