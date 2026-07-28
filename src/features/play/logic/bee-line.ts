@@ -8,9 +8,10 @@ import { Bounds, DECOY_LETTER_POOL, Point, shuffleLetters } from './honey-pot-fl
  * does not fork the four-tier ladder. Everything here is pure and unit-tested off-React, the same
  * convention `honey-pot-flick.ts` and `steal-attempt.ts` already established.
  *
- * Scope note (Epic 18 only): `decoyLetterCount`/`randomizePositionsPerAttempt` are wired but left
- * at their "off" defaults for every tier, and `timer`/`music` are left undefined everywhere —
- * those are Epic 21 (decoys) and Epic 23 (`impossible` timer/music)'s tuning work, not this one's.
+ * Scope note (updated Epic 21): `decoyLetterCount`/`randomizePositionsPerAttempt` now carry real
+ * (if unratified — see `BEE_LINE_MODE_CONFIG`'s own comments) values at `crazy`/`impossible`;
+ * `easy`/`hard` stay at 0/false, matching Epic 14's tier ladder. `timer`/`music` are still left
+ * undefined everywhere — that remains Epic 23's tuning work, not this one's.
  * Score math (`applyScore`, Epic 20) does live here, alongside `resolvePickup` — architecture 26.5's
  * instruction was that mistake CLASSIFICATION and mistake SCORING stay tunable independently of one
  * another (two separate tuning objects, `BeeLineTuning` vs. `BeeLineScoreTuning`), not that they
@@ -41,13 +42,13 @@ export type BeeLineModeConfig = {
   /** Whether the bee-towed growing trail visual is shown. UX Step 14: easy shows a faint STATIC
    *  connector in the "word so far" strip but no towed-trail motion; hard+ show the real towed trail. */
   showTowedTrail: boolean;
-  /** Decoy tiles mixed onto the field. OPEN TUNING (Epic 21). Left at 0 for every tier in Epic 18 —
-   *  Bee Line's drag-and-hunt field may want different numbers than Honey Pot Flick's flick field,
-   *  so these are NOT assumed equal to game-modes.ts's decoyLetterCount. */
+  /** Decoy tiles mixed onto the field. OPEN TUNING (Epic 21) — real at crazy/impossible, 0 at
+   *  easy/hard. Bee Line's drag-and-hunt field may want different numbers than Honey Pot Flick's
+   *  flick field, so these are NOT assumed equal to game-modes.ts's decoyLetterCount. */
   decoyLetterCount: number;
   /** Re-randomize tile positions on every attempt (impossible) vs. keep them fixed within a word
-   *  so a retry lands on the same layout (easy-crazy). Left false everywhere in Epic 18 (Epic 21
-   *  turns this on for impossible). */
+   *  so a retry lands on the same layout (easy-crazy). True only at impossible (Epic 21) — see
+   *  `BEE_LINE_MODE_CONFIG`. */
   randomizePositionsPerAttempt: boolean;
   /** Present only at impossible (Epic 23); undefined means "no clock." */
   timer?: BeeLineTimerConfig;
@@ -71,14 +72,27 @@ export const BEE_LINE_MODE_CONFIG: Record<GameMode, BeeLineModeConfig> = {
   crazy: {
     input: 'drag',
     showTowedTrail: true,
-    decoyLetterCount: 0,
+    // Epic 21 launch placeholder — NOT ratified by product/UX (roadmap Epic 21's own open
+    // question). Deliberately lower than game-modes.ts's GAME_MODE_CONFIG.crazy.decoyLetterCount
+    // (6): Bee Line's field is a smaller ~340x340px square (BeeLineScreen.tsx's styles.field) than
+    // Honey Pot Flick's pot-catching field, and DEFAULT_MIN_TILE_SPACING_PX (64px) between every
+    // tile pair (correct + decoy) leaves less room before buildBeeLineField's rejection-sampler
+    // starts falling back to crowded placements. Mirrors HPF's tier-escalation shape without
+    // copying its exact numbers, per the roadmap's explicit "not required to match" note.
+    decoyLetterCount: 3,
     randomizePositionsPerAttempt: false,
   },
   impossible: {
     input: 'drag',
     showTowedTrail: true,
-    decoyLetterCount: 0,
-    randomizePositionsPerAttempt: false,
+    // Epic 21 launch placeholder — NOT ratified (same caveat as crazy above). Escalates from
+    // crazy's 3, mirroring HPF's own crazy(6)->impossible(8) step shape, while staying below HPF's
+    // 8 for the same smaller-field reasoning.
+    decoyLetterCount: 5,
+    // The one non-placeholder decision this epic locks in: impossible rebuilds the field on every
+    // attempt (architecture 26.4) so no spatial pattern can be memorized. crazy stays false so a
+    // retry reuses the same field/layout.
+    randomizePositionsPerAttempt: true,
   },
 };
 
@@ -218,7 +232,7 @@ export function buildBeeLineField(
 export type CollectionOutcome =
   | 'correct' // the next letter in spelling order — collected, chain grows
   | 'wrong-order' // a genuine word letter, but not the next one needed
-  | 'wrong-letter'; // a decoy / not-in-word letter (only possible at crazy+, once Epic 21 lands)
+  | 'wrong-letter'; // a decoy / not-in-word letter (only possible at crazy+, per Epic 21's decoy counts)
 
 /** What a mistake does to the in-progress chain. The whole open "does wrong-order break the
  *  chain?" fork (roadmap Epic 15) is this enum — flipping a tuning value, not a redesign. */

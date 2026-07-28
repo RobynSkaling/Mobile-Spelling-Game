@@ -9,6 +9,7 @@ import {
   createCollectionState,
   DEFAULT_BEE_LINE_SCORE_TUNING,
   DEFAULT_BEE_LINE_TUNING,
+  DEFAULT_MIN_TILE_SPACING_PX,
   resolvePickup,
   ScatteredLetter,
 } from './bee-line';
@@ -32,14 +33,30 @@ describe('BEE_LINE_MODE_CONFIG', () => {
     assert.equal(BEE_LINE_MODE_CONFIG.impossible.input, 'drag');
   });
 
-  it('leaves decoys/randomization/timer/music unset at every tier (Epic 18 scope only)', () => {
+  it('leaves timer/music unset at every tier (still Epic 23 scope, unaffected by Epic 21)', () => {
     for (const mode of GAME_MODES) {
       const config = BEE_LINE_MODE_CONFIG[mode];
-      assert.equal(config.decoyLetterCount, 0);
-      assert.equal(config.randomizePositionsPerAttempt, false);
       assert.equal(config.timer, undefined);
       assert.equal(config.music, undefined);
     }
+  });
+
+  it('has no decoys at easy/hard (Epic 21 only turns decoys on for crazy/impossible)', () => {
+    assert.equal(BEE_LINE_MODE_CONFIG.easy.decoyLetterCount, 0);
+    assert.equal(BEE_LINE_MODE_CONFIG.hard.decoyLetterCount, 0);
+  });
+
+  it('has real (> 0) decoy counts at crazy/impossible, with impossible >= crazy (Epic 21)', () => {
+    assert.ok(BEE_LINE_MODE_CONFIG.crazy.decoyLetterCount > 0);
+    assert.ok(BEE_LINE_MODE_CONFIG.impossible.decoyLetterCount > 0);
+    assert.ok(BEE_LINE_MODE_CONFIG.impossible.decoyLetterCount >= BEE_LINE_MODE_CONFIG.crazy.decoyLetterCount);
+  });
+
+  it('only re-randomizes tile positions per attempt at impossible (Epic 21)', () => {
+    assert.equal(BEE_LINE_MODE_CONFIG.easy.randomizePositionsPerAttempt, false);
+    assert.equal(BEE_LINE_MODE_CONFIG.hard.randomizePositionsPerAttempt, false);
+    assert.equal(BEE_LINE_MODE_CONFIG.crazy.randomizePositionsPerAttempt, false);
+    assert.equal(BEE_LINE_MODE_CONFIG.impossible.randomizePositionsPerAttempt, true);
   });
 });
 
@@ -113,6 +130,56 @@ describe('buildBeeLineField', () => {
     for (const tile of field.tiles) {
       assert.ok(tile.position.x >= FIELD.x && tile.position.x <= FIELD.x + FIELD.width);
       assert.ok(tile.position.y >= FIELD.y && tile.position.y <= FIELD.y + FIELD.height);
+    }
+  });
+
+  /** Deterministic seeded PRNG (mulberry32) so the crowding test below is 100% reproducible instead
+   *  of depending on the ambient Math.random() — a constant `() => 0.5`-style stub (as used by the
+   *  determinism test below) won't do here since it would return the same candidate point forever,
+   *  which isn't representative of real placement behavior. */
+  function seededRandom(seed: number): () => number {
+    let state = seed;
+    return () => {
+      state |= 0;
+      state = (state + 0x6d2b79f5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  it('keeps every tile at least the default spacing apart at crazy/impossible decoy counts, on a real Bee Line field, for a typical word length (Epic 21)', () => {
+    // Epic 18's generic spacing test above already proves the invariant in the abstract with a
+    // smaller/looser scenario; this test exercises it at the actual BEE_LINE_MODE_CONFIG.crazy/
+    // .impossible decoy counts, the real BeeLineScreen.tsx field size (~340x340, styles.field), and
+    // the real default spacing (DEFAULT_MIN_TILE_SPACING_PX, unset here) for a 6-letter word — the
+    // median length across the app's built-in word lists (src/data/word-lists/built-in-word-lists.ts).
+    // Deliberately NOT the longest words in those lists (up to 13 letters): empirical probing during
+    // this epic's build found that buildBeeLineField's rejection-sampler (by design, per its own doc
+    // comment — a graceful non-throwing fallback, not a hard guarantee) starts missing the spacing
+    // target increasingly often as tile count climbs into the low-to-mid teens on this field size,
+    // independent of decoys — a pre-existing field-density ceiling (architecture 26.11's already-
+    // flagged, still-open "field density/reachability on the smallest device" item), not something
+    // this epic introduces or is scoped to fix. See this epic's roadmap addendum for the full note.
+    const beeLineField = { x: 0, y: 0, width: 340, height: 340 };
+    const word = 'garden';
+
+    for (const mode of ['crazy', 'impossible'] as const) {
+      const field = buildBeeLineField(word, BEE_LINE_MODE_CONFIG[mode].decoyLetterCount, beeLineField, {
+        random: seededRandom(mode === 'crazy' ? 1 : 2),
+      });
+
+      for (let i = 0; i < field.tiles.length; i += 1) {
+        for (let j = i + 1; j < field.tiles.length; j += 1) {
+          const a = field.tiles[i].position;
+          const b = field.tiles[j].position;
+          const distance = Math.hypot(a.x - b.x, a.y - b.y);
+          assert.ok(
+            distance >= DEFAULT_MIN_TILE_SPACING_PX - 0.001,
+            `${mode}: tiles ${i} and ${j} are only ${distance}px apart`,
+          );
+        }
+      }
     }
   });
 

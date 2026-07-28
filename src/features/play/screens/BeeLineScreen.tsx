@@ -50,8 +50,8 @@ const CELEBRATION_FADE_MS = 300;
 const CELEBRATION_TOTAL_MS = CELEBRATION_BURST_MS + CELEBRATION_HOLD_MS + CELEBRATION_FADE_MS;
 const NEXT_WORD_DELAY_MS = CELEBRATION_TOTAL_MS + 100;
 // How long the "whole trail bursts apart" beat holds before the field is ready to try again
-// (architecture 26.5's chainIntact:false window) — unreachable today since every tier ships with
-// decoyLetterCount: 0 (Epic 21 turns decoys on), but implemented for correctness regardless.
+// (architecture 26.5's chainIntact:false window) — now reachable at crazy/impossible since Epic 21
+// gave those tiers real decoyLetterCount values.
 const CHAIN_BREAK_HOLD_MS = 450;
 // Epic 20's mistake-feedback timings. The wobble/flash and scatter beats are deliberately short —
 // UX Step 18 wants a quick, silly consequence, not a moment that eats into play time.
@@ -135,10 +135,10 @@ export function BeeLineScreen() {
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const words = useMemo(() => selectedList?.words ?? [], [selectedList]);
   const gameMode = useGameModeStore((state) => state.mode);
-  // crazy/impossible have no Bee Line-specific behavior yet (Epic 21 adds decoys/re-randomization)
-  // — BEE_LINE_MODE_CONFIG already gives them the same input/trail shape as hard by construction,
-  // so this screen falls back to hard's head-steered Snake behavior at those tiers with no
-  // special-casing.
+  // crazy/impossible share hard's input/trail shape (BEE_LINE_MODE_CONFIG) and now also carry real
+  // decoyLetterCount/randomizePositionsPerAttempt values (Epic 21) — this screen needs no
+  // tier-specific branching beyond reading modeConfig, since every behavioral difference already
+  // flows from the config object itself.
   const modeConfig = BEE_LINE_MODE_CONFIG[gameMode];
   const bannerDurationMs = GAME_MODE_CONFIG[gameMode].bannerDurationMs;
   const startSession = useProgressStore((state) => state.startSession);
@@ -325,14 +325,20 @@ export function BeeLineScreen() {
     }
 
     if (result.chainBroke && field) {
-      // The whole trail scatters back onto the field in new positions (UX Step 18). The steered
-      // head/trail (hard+'s Snake rework) resets alongside it: a broken chain has no head anymore,
-      // so the first letter's tile goes back to being an ordinary undragged scattered tile once the
-      // rebuilt field lands.
+      // The whole trail scatters back onto the field (UX Step 18). Whether the tiles land at NEW
+      // positions or the SAME ones depends on the tier (architecture 26.4's "position randomization
+      // is just *when* you call the builder"): only `impossible` re-randomizes per attempt — every
+      // other tier's retry must reuse the same field, so a fresh `buildBeeLineField` call there
+      // would silently reshuffle a layout the child was trying to memorize. A tile's on-field
+      // position and its "collected" status are already tracked separately (`collectionState`), so
+      // when positions don't change, resetting collection state via `acknowledgeChainBreak` against
+      // the unchanged `field` is sufficient to make every tile reappear at its original spot.
       resolvingRef.current = true;
-      const rebuilt = buildBeeLineField(field.word, modeConfig.decoyLetterCount, fieldBounds!);
+      const nextField = modeConfig.randomizePositionsPerAttempt
+        ? buildBeeLineField(field.word, modeConfig.decoyLetterCount, fieldBounds!)
+        : field;
       setTimeout(() => {
-        setField(rebuilt);
+        setField(nextField);
         setCollectionState((state) => (state ? acknowledgeChainBreak(state) : state));
         collectedIdsRef.current = new Set();
         headPathRef.current = [];
@@ -341,7 +347,7 @@ export function BeeLineScreen() {
         resolvingRef.current = false;
         // The target word re-displays so the child can immediately restart it — no separate
         // confirmation tap, the same auto-dismissing banner used for a fresh word.
-        revealWord(rebuilt.word);
+        revealWord(nextField.word);
       }, CHAIN_BREAK_HOLD_MS);
     }
 
@@ -359,9 +365,8 @@ export function BeeLineScreen() {
    *  steers the head over a tile rather than dragging each tile to a fixed target). Checks every
    *  still-uncollected tile — not just the next expected one — so a steered head that grazes an
    *  out-of-order or decoy tile along the way still triggers the existing mistake classification,
-   *  exactly as it would for any other pickup trigger (currently only reachable for `wrong-order`,
-   *  since every tier ships with `decoyLetterCount: 0` until Epic 21 — implemented for correctness
-   *  regardless, same precedent as the chain-break handling above). */
+   *  exactly as it would for any other pickup trigger (`wrong-letter` is now reachable at
+   *  crazy/impossible since Epic 21 gave those tiers real decoyLetterCount values). */
   const checkHeadProximityPickup = (point: Point) => {
     if (!field) {
       return;
@@ -477,8 +482,12 @@ export function BeeLineScreen() {
       return;
     }
     setField(buildBeeLineField(currentWord, modeConfig.decoyLetterCount, fieldBounds));
-    // A fresh field per word (or once fieldBounds first becomes available) — impossible's
-    // per-attempt re-randomization is Epic 21's tuning work, not this epic's.
+    // Builds the field for a word's FIRST attempt (or once fieldBounds first becomes available) —
+    // every tier reuses this same call, satisfying "once per word" at easy/hard/crazy outright.
+    // impossible's "once per ATTEMPT" requirement (architecture 26.4) is satisfied by a second call
+    // site: attemptPickup's chainBroke handler rebuilds the field for every retry after this one,
+    // gated on modeConfig.randomizePositionsPerAttempt — one buildBeeLineField code path, just
+    // called from two places depending on whether it's attempt 1 or a retry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWord, fieldBounds]);
 
