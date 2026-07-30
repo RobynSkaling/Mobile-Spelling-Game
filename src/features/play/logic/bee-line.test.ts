@@ -5,7 +5,9 @@ import {
   applyScore,
   BEE_LINE_MODE_CONFIG,
   BeeLineScoreState,
+  BeeLineTimerConfig,
   buildBeeLineField,
+  computeTimeBudgetMs,
   createCollectionState,
   DEFAULT_BEE_LINE_SCORE_TUNING,
   DEFAULT_BEE_LINE_TUNING,
@@ -33,12 +35,24 @@ describe('BEE_LINE_MODE_CONFIG', () => {
     assert.equal(BEE_LINE_MODE_CONFIG.impossible.input, 'drag');
   });
 
-  it('leaves timer/music unset at every tier (still Epic 23 scope, unaffected by Epic 21)', () => {
+  it('leaves timer/music unset at every tier except impossible (Epic 23)', () => {
     for (const mode of GAME_MODES) {
       const config = BEE_LINE_MODE_CONFIG[mode];
+      if (mode === 'impossible') {
+        continue;
+      }
       assert.equal(config.timer, undefined);
       assert.equal(config.music, undefined);
     }
+  });
+
+  it('gives impossible a real timer and music cue, and keeps crazy clock-free (Epic 23)', () => {
+    assert.ok(BEE_LINE_MODE_CONFIG.impossible.timer);
+    assert.ok(BEE_LINE_MODE_CONFIG.impossible.music);
+    // UX Step 17's explicit "don't let anything leak below impossible" instruction, restated here
+    // for the timer specifically (Epic 21 already covers decoys/position-randomization).
+    assert.equal(BEE_LINE_MODE_CONFIG.crazy.timer, undefined);
+    assert.equal(BEE_LINE_MODE_CONFIG.crazy.music, undefined);
   });
 
   it('has no decoys at easy/hard (Epic 21 only turns decoys on for crazy/impossible)', () => {
@@ -57,6 +71,43 @@ describe('BEE_LINE_MODE_CONFIG', () => {
     assert.equal(BEE_LINE_MODE_CONFIG.hard.randomizePositionsPerAttempt, false);
     assert.equal(BEE_LINE_MODE_CONFIG.crazy.randomizePositionsPerAttempt, false);
     assert.equal(BEE_LINE_MODE_CONFIG.impossible.randomizePositionsPerAttempt, true);
+  });
+});
+
+describe('computeTimeBudgetMs', () => {
+  const CFG: BeeLineTimerConfig = { secondsPerLetter: 1.5, floorMs: 4000, ceilingMs: 15000 };
+
+  it('clamps a short word to floorMs', () => {
+    // 2 * 1.5 * 1000 = 3000ms, below floorMs (4000).
+    assert.equal(computeTimeBudgetMs(2, CFG), CFG.floorMs);
+  });
+
+  it('clamps a long word to ceilingMs', () => {
+    // 13 * 1.5 * 1000 = 19500ms, above ceilingMs (15000).
+    assert.equal(computeTimeBudgetMs(13, CFG), CFG.ceilingMs);
+  });
+
+  it('falls proportionally between floor and ceiling for a mid-length word', () => {
+    // 6 * 1.5 * 1000 = 9000ms, comfortably inside [floorMs, ceilingMs] — verify the exact formula's
+    // output, not just that it's "in range."
+    assert.equal(computeTimeBudgetMs(6, CFG), 9000);
+  });
+
+  it('gives a longer word a larger (or equal, once clamped) budget than a shorter one', () => {
+    const short = computeTimeBudgetMs(4, CFG);
+    const long = computeTimeBudgetMs(8, CFG);
+    assert.ok(long > short);
+  });
+
+  it('never produces a negative or NaN budget for zero or negative word lengths', () => {
+    assert.equal(computeTimeBudgetMs(0, CFG), CFG.floorMs);
+    assert.equal(computeTimeBudgetMs(-5, CFG), CFG.floorMs);
+    assert.ok(!Number.isNaN(computeTimeBudgetMs(0, CFG)));
+    assert.ok(!Number.isNaN(computeTimeBudgetMs(-5, CFG)));
+  });
+
+  it('is pure — repeated calls with the same input return the same output', () => {
+    assert.equal(computeTimeBudgetMs(6, CFG), computeTimeBudgetMs(6, CFG));
   });
 });
 

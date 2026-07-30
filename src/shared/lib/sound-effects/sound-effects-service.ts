@@ -4,10 +4,11 @@ import type { AudioPlayer, AudioStatus } from 'expo-audio';
 /**
  * One-shot game sound-effect cues — distinct from `characterAudioService`'s per-character voice
  * lines (`CharacterAudioVariant`) and from `speechService`'s TTS. Bee Line's two mistake-feedback
- * cues (Epic 20, roadmap Epic 15/UX Step 18) live here; add further cue ids as other epics need
- * generic (non-character) SFX rather than growing `CharacterAudioVariant` to cover them.
+ * cues (Epic 20, roadmap Epic 15/UX Step 18) live here, alongside the `impossible`-tier timeout
+ * "pop-pop-fizzz" cue (Epic 23, roadmap Epic 16/UX Step 17); add further cue ids as other epics
+ * need generic (non-character) SFX rather than growing `CharacterAudioVariant` to cover them.
  */
-export type SoundEffectCue = 'bee-line-wrong-order' | 'bee-line-wrong-letter';
+export type SoundEffectCue = 'bee-line-wrong-order' | 'bee-line-wrong-letter' | 'bee-line-timeout';
 
 // Audio requires (like image requires) resolve to a Metro asset module id — a number at runtime.
 type SoundEffectMap = Partial<Record<SoundEffectCue, number>>;
@@ -21,6 +22,7 @@ type SoundEffectMap = Partial<Record<SoundEffectCue, number>>;
  * happens.
  *
  *   'bee-line-wrong-order': require('../../../../assets/audio/sfx/bee-line-wrong-order.mp3'),
+ *   'bee-line-timeout': require('../../../../assets/audio/sfx/bee-line-timeout.mp3'),
  */
 const SOUND_EFFECTS: SoundEffectMap = {};
 

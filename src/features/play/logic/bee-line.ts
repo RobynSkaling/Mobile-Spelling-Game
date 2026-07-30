@@ -10,8 +10,12 @@ import { Bounds, DECOY_LETTER_POOL, Point, shuffleLetters } from './honey-pot-fl
  *
  * Scope note (updated Epic 21): `decoyLetterCount`/`randomizePositionsPerAttempt` now carry real
  * (if unratified — see `BEE_LINE_MODE_CONFIG`'s own comments) values at `crazy`/`impossible`;
- * `easy`/`hard` stay at 0/false, matching Epic 14's tier ladder. `timer`/`music` are still left
- * undefined everywhere — that remains Epic 23's tuning work, not this one's.
+ * `easy`/`hard` stay at 0/false, matching Epic 14's tier ladder.
+ * Scope note (updated Epic 23): `timer`/`music` now carry real (if unratified) values at
+ * `impossible` only — `computeTimeBudgetMs` is this file's pure timer-budget function, mirroring
+ * how `applyScore`/`resolvePickup` stay pure and RN-independent. `easy`/`hard`/`crazy` all keep both
+ * fields `undefined`, per UX Step 17's explicit instruction not to let any lighter timer leak below
+ * `impossible`.
  * Score math (`applyScore`, Epic 20) does live here, alongside `resolvePickup` — architecture 26.5's
  * instruction was that mistake CLASSIFICATION and mistake SCORING stay tunable independently of one
  * another (two separate tuning objects, `BeeLineTuning` vs. `BeeLineScoreTuning`), not that they
@@ -35,6 +39,20 @@ export type AcceleratingMusicCue = {
   endRate: number;
   rampMs: number;
 };
+
+/**
+ * Pure time-budget calculation for the `impossible`-tier timer (architecture 26.7): scales linearly
+ * with word length (`wordLength * secondsPerLetter` seconds), then clamps to `[floorMs, ceilingMs]`
+ * so a very short word isn't an instant-fail and a very long word doesn't get an unbounded budget —
+ * "a 3-letter word gets less time than an 8-letter word" (roadmap Epic 16), within a fair floor/
+ * ceiling. `wordLength <= 0` (defensive only — a real word from a word list is never empty) clamps
+ * to `floorMs` rather than producing a negative or `NaN` budget, since the raw product is `<= 0` and
+ * `Math.max` immediately floors it before the ceiling clamp ever runs.
+ */
+export function computeTimeBudgetMs(wordLength: number, cfg: BeeLineTimerConfig): number {
+  const rawMs = Math.max(wordLength, 0) * cfg.secondsPerLetter * 1000;
+  return Math.min(Math.max(rawMs, cfg.floorMs), cfg.ceilingMs);
+}
 
 export type BeeLineModeConfig = {
   /** 'tap' at easy, 'drag' at hard+ (roadmap Epic 14 acceptance criteria). */
@@ -93,6 +111,22 @@ export const BEE_LINE_MODE_CONFIG: Record<GameMode, BeeLineModeConfig> = {
     // attempt (architecture 26.4) so no spatial pattern can be memorized. crazy stays false so a
     // retry reuses the same field/layout.
     randomizePositionsPerAttempt: true,
+    // Epic 23 launch placeholder — NOT ratified by product/UX (same caveat as decoyLetterCount
+    // above; see this epic's roadmap addendum). secondsPerLetter: 1.5 puts a typical 5-6 letter
+    // word (the built-in lists' median length, per Epic 21's own crowding note) at 7.5-9s — tight
+    // enough to feel like a real race for the "confident 9-year-old" this tier targets, without
+    // being unwinnable. floorMs: 4000 keeps even a very short word from being an instant-fail
+    // blink-and-you-lose budget. ceilingMs: 15000 caps the longest built-in words (up to 13
+    // letters) well short of the ~29s the raw per-letter formula would otherwise produce, keeping
+    // the "race against the clock" feel intact even for a long word.
+    timer: { secondsPerLetter: 1.5, floorMs: 4000, ceilingMs: 15000 },
+    // Epic 23 launch placeholder — NOT ratified. startRate/endRate (1.0 -> 1.4) mirror architecture
+    // 26.7's own "e.g. 1.0 -> ~1.4" example. rampMs here is a required-by-type filler value only —
+    // BeeLineScreen.tsx's playLoop() call sites always spread this cue and override rampMs with
+    // that attempt's real computeTimeBudgetMs(...) result, so the acceleration curve peaks exactly
+    // at that attempt's actual deadline regardless of word length; this static rampMs (set to
+    // ceilingMs, the longest a real ramp could run) is never itself heard.
+    music: { trackId: 'bee-line-impossible-chase', loop: true, startRate: 1.0, endRate: 1.4, rampMs: 15000 },
   },
 };
 

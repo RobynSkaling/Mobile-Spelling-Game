@@ -9,6 +9,7 @@ import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
 import { speechService } from '@/shared/lib/speech';
 import { soundEffectsService } from '@/shared/lib/sound-effects';
+import { gameMusicService } from '@/shared/lib/music';
 import { Confetti } from '@/shared/ui/Confetti';
 import { HexTile } from '@/shared/ui/HexTile';
 import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
@@ -22,6 +23,7 @@ import {
   BeeLineScoreState,
   buildBeeLineField,
   CollectionState,
+  computeTimeBudgetMs,
   createCollectionState,
   DEFAULT_BEE_LINE_SCORE_TUNING,
   DEFAULT_BEE_LINE_TUNING,
@@ -63,16 +65,52 @@ const BEE_HEADSHAKE_DURATION_MS = 420;
 // (CHAIN_BREAK_HOLD_MS), so the snapshot overlay below fades out right as the rebuilt field lands.
 const SCATTER_BURST_DURATION_MS = CHAIN_BREAK_HOLD_MS;
 
+// Epic 23's impossible-tier timer/fuse/firework timings. Longer than the wrong-letter scatter's
+// CHAIN_BREAK_HOLD_MS/SCATTER_BURST_DURATION_MS above — the roadmap explicitly wants the timeout
+// explosion staged as "the bigger, firework-scale burst" on UX Step 18's shared comedic ladder, so
+// it needs to read as a bigger beat, not a same-sized one with different colors.
+const FIREWORK_BURST_DURATION_MS = 650;
+const TIMEOUT_HOLD_MS = FIREWORK_BURST_DURATION_MS + 150;
+const FIREWORK_PARTICLE_COUNT = 10;
+const FIREWORK_BURST_RADIUS_PX = 90;
+// Small fuse/sparkler burn-down bar (UX Step 17: the fuse is the PRIMARY read, never a numeral) —
+// rendered above the steered head, front-of-trail, only when modeConfig.timer is defined.
+const FUSE_BAR_WIDTH_PX = 84;
+const FUSE_BAR_HEIGHT_PX = 10;
+
 /** A snapshot of the in-progress trail's positions/letters, captured the instant a wrong-letter
- *  mistake is detected — before `resolvePickup`'s break-chain outcome empties `collectionState`.
- *  Rendered as its own overlay during the scatter burst so the trail visibly "poofs apart" instead
- *  of vanishing instantly (the polish gap Epic 19.5 flagged and explicitly deferred to this epic). */
+ *  mistake OR an impossible-tier timeout is detected — before the collection state that produced it
+ *  gets reset. Rendered as its own overlay during the scatter/firework burst so the trail visibly
+ *  "poofs apart"/"explodes" instead of vanishing instantly (the polish gap Epic 19.5 flagged and
+ *  Epic 20 fixed for the mistake path; Epic 23 reuses the same capture-before-reset technique for
+ *  the timeout path rather than inventing a second snapshot shape for an identical need). */
 type ScatterSnapshot = {
   headPosition: Point;
   headLetter: string;
   trailPositions: Point[];
   trailLetters: string;
 };
+
+/**
+ * Fixed geometry for the firework burst's particles — a fan spread mostly UPWARD (roadmap: "a
+ * single big upward 'whoosh'... vs. confetti falling from above"), not an all-directions firework,
+ * so it reads distinctly from both the win-celebration confetti (falls from above) and the
+ * wrong-letter scatter (tiles fling outward/downward with rotation). Computed once at module scope
+ * — a fixed prop table for a handful of `Animated.View`s, not a reusable particle-system
+ * abstraction (this codebase's stated no-premature-abstraction convention; mirrors how the existing
+ * scatter burst is just a handful of `Animated.View`s too).
+ */
+const FIREWORK_PARTICLES = Array.from({ length: FIREWORK_PARTICLE_COUNT }, (_, index) => {
+  // -90deg is straight up; spread +/-75deg around it so every particle still reads as "upward."
+  const angleDeg = -90 + (index - (FIREWORK_PARTICLE_COUNT - 1) / 2) * (150 / (FIREWORK_PARTICLE_COUNT - 1));
+  const angleRad = (angleDeg * Math.PI) / 180;
+  return {
+    dx: Math.cos(angleRad) * FIREWORK_BURST_RADIUS_PX,
+    dy: Math.sin(angleRad) * FIREWORK_BURST_RADIUS_PX,
+    // Bright gold/hot-pink (roadmap's exact palette call), alternating per particle.
+    color: index % 2 === 0 ? theme.colors.gold : theme.colors.accent,
+  };
+});
 
 export function BeeLineScreen() {
   const [currentWord, setCurrentWord] = useState<string | null>(null);
@@ -100,6 +138,13 @@ export function BeeLineScreen() {
   const [mistakeTileId, setMistakeTileId] = useState<string | null>(null);
   // Non-null only during a wrong-letter scatter burst — see ScatterSnapshot's doc comment above.
   const [scatterSnapshot, setScatterSnapshot] = useState<ScatterSnapshot | null>(null);
+  // Non-null only during an impossible-tier timeout's firework burst — same ScatterSnapshot shape,
+  // captured from the trail right before the timeout restart resets collectionState.
+  const [fireworkSnapshot, setFireworkSnapshot] = useState<ScatterSnapshot | null>(null);
+  // Seconds-remaining readout for the fuse's optional small secondary numeral (UX Step 17: the fuse
+  // itself is the primary read). null whenever modeConfig.timer is undefined (every tier but
+  // impossible) or no timed attempt is currently running.
+  const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
 
   const bannerOpacity = useRef(new Animated.Value(0)).current;
   const bannerScale = useRef(new Animated.Value(0.6)).current;
@@ -120,6 +165,17 @@ export function BeeLineScreen() {
   const scatterAnim = useRef(new Animated.Value(0)).current;
   const mistakeTileTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scorePopupKeyRef = useRef(0);
+  // 1 -> 0 over the current attempt's computed time budget — the fuse/sparkler burn-down
+  // (UX Step 17's primary, non-numeral read). Only ever animated when modeConfig.timer is defined.
+  const fuseAnim = useRef(new Animated.Value(1)).current;
+  // 0 -> 1 over FIREWORK_BURST_DURATION_MS, driving the timeout firework's upward particle burst
+  // and the fading trail/head tiles underneath it.
+  const fireworkAnim = useRef(new Animated.Value(0)).current;
+  // Fires handleTimeout at the end of the current timed attempt's budget; cleared on word success,
+  // a fresh attempt starting, or unmount, so a stale timeout can never fire after the word is done.
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ticks secondsRemaining down once a second for the fuse's optional secondary numeral.
+  const secondsTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // The head's recorded path history (container-relative points, oldest first, current head
   // position last) — kept in a ref so it can grow every drag frame without forcing a re-render on
   // its own; `headPosition` is the reactive trigger that actually schedules the re-render that
@@ -229,6 +285,133 @@ export function BeeLineScreen() {
     }).start();
   };
 
+  /** Drives the impossible-tier timeout's firework burst on `fireworkSnapshot` over
+   *  FIREWORK_BURST_DURATION_MS — deliberately a distinct animation from `triggerScatterBurst`
+   *  (no per-tile outward fling/rotate), since the roadmap calls for this to read as a bigger,
+   *  visually different beat: a single upward "whoosh" of gold/hot-pink particles, not a scatter. */
+  const triggerFireworkBurst = () => {
+    fireworkAnim.setValue(0);
+    Animated.timing(fireworkAnim, {
+      toValue: 1,
+      duration: FIREWORK_BURST_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  };
+
+  /** Clears whatever's driving the current impossible-tier timed attempt — the pending timeout, the
+   *  seconds-remaining tick, and the fuse animation — without touching the music loop (callers stop
+   *  that explicitly at the two documented moments: a timeout firing, and word success). Safe to
+   *  call at any tier; it's simply a no-op past the first two `if`s when nothing is running. */
+  const clearImpossibleTimer = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    if (secondsTickRef.current) {
+      clearInterval(secondsTickRef.current);
+      secondsTickRef.current = null;
+    }
+    fuseAnim.stopAnimation();
+  };
+
+  /**
+   * (Re)starts the impossible-tier timer/fuse/music for a fresh attempt at `word` — the single
+   * "start of a timed attempt" moment shared by all three triggers a fresh impossible attempt can
+   * begin from: a brand-new word, a decoy-mistake retry, and a timeout retry (mirroring how
+   * `buildBeeLineField` already has two call sites sharing one function — this is a third call site
+   * for a second per-attempt concern). No-ops (after clearing any stale timer) at every tier below
+   * impossible, since `modeConfig.timer`/`modeConfig.music` are undefined there — this is the single
+   * gate that keeps the whole timer/fuse/music feature from leaking below impossible, per UX Step
+   * 17's explicit instruction.
+   */
+  const startTimedAttempt = (word: string) => {
+    clearImpossibleTimer();
+
+    if (!modeConfig.timer) {
+      setSecondsRemaining(null);
+      return;
+    }
+
+    const budgetMs = computeTimeBudgetMs(word.length, modeConfig.timer);
+    setSecondsRemaining(Math.ceil(budgetMs / 1000));
+    fuseAnim.setValue(1);
+    Animated.timing(fuseAnim, {
+      toValue: 0,
+      duration: budgetMs,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    }).start();
+
+    secondsTickRef.current = setInterval(() => {
+      setSecondsRemaining((current) => (current !== null && current > 0 ? current - 1 : current));
+    }, 1000);
+
+    timeoutRef.current = setTimeout(() => {
+      handleTimeout(word);
+    }, budgetMs);
+
+    if (modeConfig.music) {
+      // rampMs is overridden here with this attempt's actual budget — modeConfig.music.rampMs
+      // itself is only a required-by-type placeholder (see BEE_LINE_MODE_CONFIG's comment) so the
+      // acceleration always peaks exactly at THIS word's real deadline, regardless of word length.
+      gameMusicService.playLoop({ ...modeConfig.music, rampMs: budgetMs });
+    }
+  };
+
+  /**
+   * Fires when an impossible-tier attempt's timer expires before the word is finished. Reuses the
+   * exact ScatterSnapshot capture-before-reset technique the wrong-letter mistake path already
+   * uses (see that comment in `attemptPickup`), but stages a bigger, visually distinct firework
+   * burst instead of the "sproing/poof" scatter, per the roadmap's explicit "deliberately visually
+   * distinct... so a child can tell success from timeout within a second." After the burst holds,
+   * the word restarts from scratch (a full `createCollectionState`, not the partial
+   * `acknowledgeChainBreak` a chain-break retry uses) and a fresh timed attempt begins.
+   */
+  const handleTimeout = (word: string) => {
+    if (resolvingRef.current || !collectionState || collectionState.status !== 'in-progress') {
+      return;
+    }
+
+    resolvingRef.current = true;
+    clearImpossibleTimer();
+    gameMusicService.stop();
+
+    const preTimeoutTrailLetters = word.slice(1, collectionState.nextExpectedIndex);
+    const preTimeoutHeadPosition = headPosition ?? field?.tiles.find((t) => t.orderIndex === 0)?.position ?? null;
+    if (preTimeoutHeadPosition) {
+      setFireworkSnapshot({
+        headPosition: preTimeoutHeadPosition,
+        headLetter: word[0] ?? '',
+        trailPositions: resolveTrailSegmentPositions(headPathRef.current, preTimeoutTrailLetters.length, TRAIL_SEGMENT_SPACING_PX),
+        trailLetters: preTimeoutTrailLetters,
+      });
+    }
+
+    triggerFireworkBurst();
+    soundEffectsService.playCue('bee-line-timeout');
+    setFeedback("Time's up! Let's try that word again.");
+
+    setTimeout(() => {
+      // impossible always randomizes positions per attempt (Epic 21) — a timeout retry is a fresh
+      // attempt, so it rebuilds the field exactly like the chainBroke branch's impossible-only
+      // rebuild does, just unconditionally here since this path is impossible-only by construction
+      // (modeConfig.timer is only ever defined at impossible).
+      const nextField = buildBeeLineField(word, modeConfig.decoyLetterCount, fieldBounds!);
+      setField(nextField);
+      setCollectionState(createCollectionState(word));
+      collectedIdsRef.current = new Set();
+      headPathRef.current = [];
+      setHeadPosition(null);
+      setFireworkSnapshot(null);
+      resolvingRef.current = false;
+      // Same "here's the word again, try again" cue the chain-break retry already uses — replaying
+      // it here keeps the two retry paths consistent rather than inventing a second confirmation UI.
+      revealWord(word);
+      startTimedAttempt(word);
+    }, TIMEOUT_HOLD_MS);
+  };
+
   const triggerCelebration = () => {
     setCelebrating(true);
     celebrationOpacity.setValue(0);
@@ -260,6 +443,10 @@ export function BeeLineScreen() {
 
   const handleWordComplete = (word: string) => {
     resolvingRef.current = true;
+    // A completed word must never let a stale impossible-tier timeout fire afterward — cancel the
+    // fuse/timer and the music loop the instant success lands, win or not.
+    clearImpossibleTimer();
+    gameMusicService.stop();
     setFeedback('Perfect! The whole word is collected.');
     recordWordCompleted(word);
     triggerCelebration();
@@ -348,6 +535,9 @@ export function BeeLineScreen() {
         // The target word re-displays so the child can immediately restart it — no separate
         // confirmation tap, the same auto-dismissing banner used for a fresh word.
         revealWord(nextField.word);
+        // A decoy-mistake retry is a fresh attempt at impossible too — re-arm the fuse/timer/music
+        // for it. No-op at every other tier (modeConfig.timer is undefined there).
+        startTimedAttempt(nextField.word);
       }, CHAIN_BREAK_HOLD_MS);
     }
 
@@ -444,9 +634,12 @@ export function BeeLineScreen() {
       if (mistakeTileTimeoutRef.current) {
         clearTimeout(mistakeTileTimeoutRef.current);
       }
+      clearImpossibleTimer();
       speechService.stop();
       soundEffectsService.stopAll();
+      gameMusicService.stopAll();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -473,6 +666,7 @@ export function BeeLineScreen() {
     setScorePopup(null);
     setMistakeTileId(null);
     setScatterSnapshot(null);
+    setFireworkSnapshot(null);
     revealWord(currentWord);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWord]);
@@ -488,6 +682,9 @@ export function BeeLineScreen() {
     // site: attemptPickup's chainBroke handler rebuilds the field for every retry after this one,
     // gated on modeConfig.randomizePositionsPerAttempt — one buildBeeLineField code path, just
     // called from two places depending on whether it's attempt 1 or a retry.
+    // A brand-new word is also the first of the three "start a fresh timed attempt" moments (Epic
+    // 23) — no-ops below impossible since modeConfig.timer is undefined there.
+    startTimedAttempt(currentWord);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWord, fieldBounds]);
 
@@ -553,6 +750,23 @@ export function BeeLineScreen() {
   const scatterScale = scatterAnim.interpolate({ inputRange: [0, 0.35, 1], outputRange: [1, 1.2, 0.2] });
   const scatterRotate = scatterAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '150deg'] });
   const beeHeadshakeRotate = beeShakeAnim.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-22deg', '0deg', '22deg'] });
+
+  // The fuse/sparkler burn-down (UX Step 17): the filled bar's left edge stays fixed while its
+  // right edge shrinks toward it as fuseAnim runs 1 -> 0, via a scaleX + compensating translateX
+  // (rather than animating `width` every frame) so the burn-down stays on the native driver.
+  const fuseScaleX = fuseAnim;
+  const fuseTranslateX = fuseAnim.interpolate({ inputRange: [0, 1], outputRange: [-FUSE_BAR_WIDTH_PX / 2, 0] });
+  // The lit spark rides the tip of the shrinking fill, from the far end down to the fixed origin.
+  const fuseSparkTranslateX = fuseAnim.interpolate({ inputRange: [0, 1], outputRange: [0, FUSE_BAR_WIDTH_PX] });
+
+  // The timeout firework burst: the trail/head tiles caught mid-attempt simply fade+shrink in
+  // place (no fling/rotate — that treatment is reserved for the wrong-letter scatter above, so the
+  // two consequences read as visually distinct), while FIREWORK_PARTICLES do the actual "upward
+  // whoosh" via their own per-particle translateX/translateY below.
+  const fireworkTileOpacity = fireworkAnim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [1, 1, 0] });
+  const fireworkTileScale = fireworkAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.3] });
+  const fireworkParticleOpacity = fireworkAnim.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 1, 0] });
+  const fireworkParticleScale = fireworkAnim.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0.3, 1.3, 0.7] });
 
   return (
     <View
@@ -705,10 +919,10 @@ export function BeeLineScreen() {
                   {/* The head: the first letter's tile, doubling as the drag handle for the whole
                       chain. Always the same element (never unmounted across the "just a scattered
                       tile" -> "steering the snake" transition), so an in-flight touch survives it.
-                      Hidden during a wrong-letter scatter burst — `scatterSnapshot`'s overlay below
-                      takes over showing (and animating away) the head for that window instead, so
-                      the two don't visually double up. */}
-                  {headFieldTile && headPan && !scatterSnapshot ? (
+                      Hidden during a wrong-letter scatter burst or a timeout firework burst — their
+                      respective overlays below take over showing (and animating away) the head for
+                      that window instead, so nothing visually doubles up. */}
+                  {headFieldTile && headPan && !scatterSnapshot && !fireworkSnapshot ? (
                     <GestureDetector gesture={headPan}>
                       <View
                         testID="bee-line-head"
@@ -718,6 +932,43 @@ export function BeeLineScreen() {
                         <HexTile letter={headFieldTile.letter} size={TILE_SIZE} />
                       </View>
                     </GestureDetector>
+                  ) : null}
+
+                  {/* Impossible-tier fuse/sparkler burn-down (UX Step 17) — the PRIMARY read for
+                      the time budget, front-of-trail at the steered head's position. Only rendered
+                      when modeConfig.timer is defined (impossible only) and no burst is in
+                      progress; the small numeral beside it is a deliberately secondary readout, not
+                      the dominant element. */}
+                  {modeConfig.timer && headRenderPosition && !scatterSnapshot && !fireworkSnapshot ? (
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.fuseWrapper,
+                        {
+                          left: headRenderPosition.x - (fieldBounds?.x ?? 0) - FUSE_BAR_WIDTH_PX / 2,
+                          top: headRenderPosition.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2 - 34,
+                        },
+                      ]}
+                    >
+                      <View testID="bee-line-fuse-track" style={styles.fuseTrack}>
+                        <Animated.View
+                          style={[
+                            styles.fuseFill,
+                            { transform: [{ translateX: fuseTranslateX }, { scaleX: fuseScaleX }] },
+                          ]}
+                        />
+                        <Animated.Text
+                          style={[styles.fuseSpark, { transform: [{ translateX: fuseSparkTranslateX }] }]}
+                        >
+                          ✨
+                        </Animated.Text>
+                      </View>
+                      {secondsRemaining !== null ? (
+                        <Text testID="bee-line-fuse-seconds" style={styles.fuseSecondsText}>
+                          {secondsRemaining}s
+                        </Text>
+                      ) : null}
+                    </View>
                   ) : null}
 
                   {/* Wrong-letter's "sproing/poof" scatter burst (UX Step 18): the trail's pre-break
@@ -780,6 +1031,83 @@ export function BeeLineScreen() {
                         </Animated.Text>
                         <HexTile letter={scatterSnapshot.headLetter} size={TILE_SIZE} />
                       </Animated.View>
+                    </View>
+                  ) : null}
+
+                  {/* Impossible-tier timeout's firework burst (UX Step 17/18) — deliberately
+                      distinct from both the wrong-letter scatter above (no fling/rotate) and the
+                      win-celebration confetti (a single upward whoosh from the fuse's origin point,
+                      not a shower falling from above), so a child can tell success from timeout
+                      within a second. The trail/head caught mid-attempt just fade+shrink in place;
+                      FIREWORK_PARTICLES carry the actual "explosion" read. */}
+                  {fireworkSnapshot ? (
+                    <View pointerEvents="none">
+                      {fireworkSnapshot.trailPositions.map((position, index) => {
+                        const trailLeft = position.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2;
+                        const trailTop = position.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2;
+
+                        return (
+                          <Animated.View
+                            key={`firework-trail-${index}`}
+                            style={[
+                              styles.tileWrapper,
+                              {
+                                left: trailLeft,
+                                top: trailTop,
+                                zIndex: 5 + (fireworkSnapshot.trailPositions.length - index),
+                                opacity: fireworkTileOpacity,
+                                transform: [{ scale: fireworkTileScale }],
+                              },
+                            ]}
+                          >
+                            <HexTile letter={fireworkSnapshot.trailLetters[index]} size={TILE_SIZE} backgroundColor={theme.colors.gold} />
+                          </Animated.View>
+                        );
+                      })}
+
+                      <Animated.View
+                        style={[
+                          styles.tileWrapper,
+                          styles.headWrapper,
+                          {
+                            left: fireworkSnapshot.headPosition.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2,
+                            top: fireworkSnapshot.headPosition.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2,
+                            opacity: fireworkTileOpacity,
+                            transform: [{ scale: fireworkTileScale }],
+                          },
+                        ]}
+                      >
+                        <Text style={styles.beeRider}>🐝</Text>
+                        <HexTile letter={fireworkSnapshot.headLetter} size={TILE_SIZE} />
+                      </Animated.View>
+
+                      {/* The particle burst itself — a fan of gold/hot-pink dots launched upward
+                          from the fuse's origin (the pre-timeout head position) and fading out. */}
+                      <View
+                        style={{
+                          position: 'absolute',
+                          left: fireworkSnapshot.headPosition.x - (fieldBounds?.x ?? 0),
+                          top: fireworkSnapshot.headPosition.y - (fieldBounds?.y ?? 0),
+                        }}
+                      >
+                        {FIREWORK_PARTICLES.map((particle, index) => (
+                          <Animated.View
+                            key={`firework-particle-${index}`}
+                            style={[
+                              styles.fireworkParticle,
+                              {
+                                backgroundColor: particle.color,
+                                opacity: fireworkParticleOpacity,
+                                transform: [
+                                  { translateX: fireworkAnim.interpolate({ inputRange: [0, 1], outputRange: [0, particle.dx] }) },
+                                  { translateY: fireworkAnim.interpolate({ inputRange: [0, 1], outputRange: [0, particle.dy] }) },
+                                  { scale: fireworkParticleScale },
+                                ],
+                              },
+                            ]}
+                          />
+                        ))}
+                      </View>
                     </View>
                   ) : null}
                 </>
@@ -1005,6 +1333,54 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -18,
     fontSize: 22,
+  },
+  // Impossible-tier fuse/sparkler (Epic 23, UX Step 17) — front-of-trail, above the steered head.
+  fuseWrapper: {
+    position: 'absolute',
+    width: FUSE_BAR_WIDTH_PX,
+    alignItems: 'center',
+    zIndex: 21,
+  },
+  fuseTrack: {
+    width: FUSE_BAR_WIDTH_PX,
+    height: FUSE_BAR_HEIGHT_PX,
+    borderRadius: FUSE_BAR_HEIGHT_PX / 2,
+    backgroundColor: 'rgba(17,17,17,0.35)',
+    borderWidth: 2,
+    borderColor: '#111111',
+    overflow: 'visible',
+    justifyContent: 'center',
+  },
+  fuseFill: {
+    width: FUSE_BAR_WIDTH_PX,
+    height: FUSE_BAR_HEIGHT_PX - 4,
+    borderRadius: (FUSE_BAR_HEIGHT_PX - 4) / 2,
+    marginHorizontal: 2,
+    // Warm-to-hot gradient isn't available via a flat RN style, so a single bright, fire-like
+    // orange stands in for the "burning" fill — reads clearly against the fuse track's dark base.
+    backgroundColor: '#FF8C00',
+  },
+  fuseSpark: {
+    position: 'absolute',
+    fontSize: 14,
+    left: -7,
+  },
+  // Deliberately small/secondary (UX Step 17: the fuse is the PRIMARY read, this numeral is not).
+  fuseSecondsText: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  // The timeout firework's particles — small bright dots, not letter tiles, so the burst reads as
+  // its own distinct "explosion" element layered over the fading trail/head beneath it.
+  fireworkParticle: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#111111',
   },
   feedback: {
     marginTop: theme.spacing.lg,
