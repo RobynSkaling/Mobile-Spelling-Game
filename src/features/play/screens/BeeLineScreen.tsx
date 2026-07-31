@@ -12,9 +12,14 @@ import { soundEffectsService } from '@/shared/lib/sound-effects';
 import { gameMusicService } from '@/shared/lib/music';
 import { Confetti } from '@/shared/ui/Confetti';
 import { HexTile } from '@/shared/ui/HexTile';
+import { Character } from '@/shared/ui/Character';
+import { useCharacterAnimationState } from '@/shared/ui/useCharacterAnimationState';
 import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
 import { Bounds, Point, getNextWord, toContainerRelative } from '@/features/play/logic/honey-pot-flick';
 import { appendTrailPathPoint, resolveTrailSegmentPositions } from '@/features/play/logic/snake-trail';
+import { getVillainBehaviorTier } from '@/data/characters/villain-behavior';
+import { getEligibleVillains, pickNextVillain, VILLAIN_POOL_CONFIG } from '@/data/characters/villain-pool';
+import { getBeeLineVillainCapabilities } from '@/features/play/logic/bee-line-villain-capabilities';
 import {
   acknowledgeChainBreak,
   applyScore,
@@ -199,6 +204,31 @@ export function BeeLineScreen() {
   const bannerDurationMs = GAME_MODE_CONFIG[gameMode].bannerDurationMs;
   const startSession = useProgressStore((state) => state.startSession);
   const recordWordCompleted = useProgressStore((state) => state.recordWordCompleted);
+
+  // Bee Line keeps its villain pick in local component state rather than reusing session-store.ts's
+  // villainId/pickSessionVillain/lastVillainId (PlayScreen/HPF's home for those fields) — this
+  // screen has never imported session-store.ts, and every prior Bee Line epic keeps this game's own
+  // state (running score, collection state, etc.) local rather than coupling to HPF's session store,
+  // even where the underlying primitive (`pickNextVillain`, a pure function) is shared. Picked once
+  // per mount via a lazy initializer, mirroring PlayScreen's "once per mount" pickSessionVillain
+  // call — just without the cross-game "don't repeat the other game's last villain" memory that
+  // reusing the shared store's `lastVillainId` would introduce; this game has no prior pick of its
+  // own to exclude, so `lastVillainId` is always null here.
+  const [villainId] = useState<string | null>(() =>
+    pickNextVillain(getEligibleVillains(VILLAIN_POOL_CONFIG, gameMode), null),
+  );
+  // Bee Line's own capability-light tier -> capabilities map (architecture 26.8) — deliberately
+  // never lists 'StealResource', so a present villain here can never imply steal machinery. A
+  // villain only renders/reacts once this tier grants at least one capability (Interfering at
+  // `crazy`, Relentless at `impossible`) — Passive/Taunting's "villain absent" is simply that empty
+  // array, not a separate `gameMode === 'crazy' || gameMode === 'impossible'` check, matching this
+  // screen's existing no-tier-string-branching convention.
+  const villainTier = getVillainBehaviorTier(gameMode);
+  const villainCapabilities = getBeeLineVillainCapabilities(villainTier);
+  const villainPresent = villainId != null && villainCapabilities.length > 0;
+
+  const mamaBear = useCharacterAnimationState();
+  const villain = useCharacterAnimationState();
 
   const revealWord = (word: string) => {
     if (bannerTimeoutRef.current) {
@@ -392,6 +422,15 @@ export function BeeLineScreen() {
     soundEffectsService.playCue('bee-line-timeout');
     setFeedback("Time's up! Let's try that word again.");
 
+    // An optional gleeful, harmless laugh at the explosion (architecture 26.8) — fired as its own
+    // independent pose change in the villain's stable row position, with no positional link or
+    // shared animation timeline with the firework particles above, so it never reads as though the
+    // villain caused the explosion. Reuses the same 'Challenging' heckle state (option (a): the
+    // roadmap doesn't ask for a distinct state for the laugh specifically).
+    if (villainPresent) {
+      villain.trigger('Challenging');
+    }
+
     setTimeout(() => {
       // impossible always randomizes positions per attempt (Epic 21) — a timeout retry is a fresh
       // attempt, so it rebuilds the field exactly like the chainBroke branch's impossible-only
@@ -414,6 +453,14 @@ export function BeeLineScreen() {
 
   const triggerCelebration = () => {
     setCelebrating(true);
+    // Mama Bear celebrates for exactly as long as the confetti overlay runs (mirroring HPF's own
+    // triggerCelebration pairing) so her reaction and the overlay resolve together rather than one
+    // outlasting the other. The villain — only when this tier actually stages one — goes
+    // 'Defeated' alongside her, the same "child wins, villain looks deflated" beat HPF already uses.
+    mamaBear.trigger('Celebrating', CELEBRATION_TOTAL_MS);
+    if (villainPresent) {
+      villain.trigger('Defeated', CELEBRATION_TOTAL_MS);
+    }
     celebrationOpacity.setValue(0);
     celebrationScale.setValue(0.5);
     confettiProgress.setValue(0);
@@ -484,11 +531,28 @@ export function BeeLineScreen() {
     setFeedback(result.outcome === 'wrong-order' ? "Not the next letter yet — try again!" : "That's not it — try again!");
     triggerScorePopup(nextScoreState.running - scoreState.running);
 
+    // Both mistake branches below (wrong-order, wrong-letter) route through here, so the villain's
+    // heckle is wired once, at this shared chokepoint, rather than duplicated per-outcome — mirroring
+    // HPF's own rejectPot precedent. Deliberately the plain 'Challenging' heckle only: no
+    // 'BeingNaughty' steal-telegraph, no larder-directed lunge — this villain never has a wind-up to
+    // pay off.
+    if (villainPresent) {
+      villain.trigger('Challenging');
+    }
+
     if (result.outcome === 'wrong-order') {
       // 'keep-chain' (this tier's default) leaves the trail fully intact — the mis-tapped tile just
       // bounces back to its field position, uncollected. Only the wobble/flash/sound treatment fires.
       triggerTileWobble(tile.id);
       soundEffectsService.playCue('bee-line-wrong-order');
+      // A warm, non-scolding reaction to this gentler slip only (not wrong-letter, which already
+      // gets the bigger headshake/scatter treatment above — layering Mama Bear on top of that wasn't
+      // asked for). Roadmap/architecture claim she "already" reacts this way to an HPF miss — she
+      // doesn't (rejectPot never calls mamaBear.trigger; see this epic's roadmap addendum). 'Talking'
+      // is HPF's own warm, low-stakes cheer (its per-correct-letter reaction), reused here as the new
+      // "warm, non-scolding" reaction this epic actually asks for — reads warmer than 'Poked's
+      // playful bump.
+      mamaBear.trigger('Talking');
     }
 
     if (result.outcome === 'wrong-letter' && currentWord) {
@@ -788,6 +852,15 @@ export function BeeLineScreen() {
       </Text>
       {selectedList ? <Text style={styles.listName}>List: {selectedList.name}</Text> : null}
       <Text style={styles.modeLine}>Mode: {GAME_MODE_CONFIG[gameMode].label}</Text>
+
+      {words.length > 0 ? (
+        <View style={styles.characterRow}>
+          <Character characterId="mama-bear" size="medium" animationState={mamaBear.animationState} />
+          {villainPresent && villainId ? (
+            <Character characterId={villainId} size="small" animationState={villain.animationState} />
+          ) : null}
+        </View>
+      ) : null}
 
       {words.length === 0 ? (
         <View style={styles.emptyListCard}>
@@ -1199,6 +1272,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '700',
     fontSize: 13,
+  },
+  characterRow: {
+    marginTop: theme.spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    gap: theme.spacing.lg,
   },
   emptyListCard: {
     marginTop: theme.spacing.lg,
