@@ -8,6 +8,7 @@ import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
+import { useDailyRewardsStore } from '@/stores/daily-rewards-store';
 import { speechService } from '@/shared/lib/speech';
 import { characterAudioService } from '@/shared/lib/character-audio';
 import { useReduceMotion } from '@/shared/lib/accessibility';
@@ -126,6 +127,7 @@ export function PlayScreen() {
   const recordCorrectFlick = useProgressStore((state) => state.recordCorrectFlick);
   const recordMissedFlick = useProgressStore((state) => state.recordMissedFlick);
   const recordWordCompleted = useProgressStore((state) => state.recordWordCompleted);
+  const recordCompletedPlay = useDailyRewardsStore((state) => state.recordCompletedPlay);
 
   // The villain-behavior tier (25.10.4) drives whether steal machinery exists at all — `null`
   // tuning at Passive means no steal state is ever instantiated, purely Epic 10's animation-only
@@ -580,6 +582,11 @@ export function PlayScreen() {
       setFeedback('Perfect! The whole word is spelled.');
       recordWordCompleted(currentWord);
       earnHoneyPot();
+      // Independent of the two calls above (progress mastery / session honeyStash) — architecture
+      // 27.6/27.7's daily-streak-and-sticker signal, kept in its own store. Bee Line's own
+      // word-completion handoff (a separate, not-yet-built epic) should add this identical call
+      // once it exists, so both games feed the same signal with no per-game branching.
+      recordCompletedPlay(Date.now());
       setTimeout(() => {
         setCurrentWord(getNextWord(words, currentWord));
       }, NEXT_WORD_DELAY_MS);

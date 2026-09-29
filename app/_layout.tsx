@@ -6,6 +6,7 @@ import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { useGameSelectionStore } from '@/stores/game-selection-store';
 import { useProgressStore } from '@/stores/progress-store';
+import { useDailyRewardsStore } from '@/stores/daily-rewards-store';
 import { speechService } from '@/shared/lib/speech';
 
 export default function RootLayout() {
@@ -14,6 +15,7 @@ export default function RootLayout() {
   const loadMode = useGameModeStore((state) => state.loadMode);
   const loadSelectedGame = useGameSelectionStore((state) => state.loadSelectedGame);
   const loadProgress = useProgressStore((state) => state.loadProgress);
+  const loadDailyRewards = useDailyRewardsStore((state) => state.loadDailyRewards);
 
   useEffect(() => {
     loadProfile();
@@ -21,8 +23,9 @@ export default function RootLayout() {
     loadMode();
     loadSelectedGame();
     loadProgress();
+    loadDailyRewards();
     speechService.init();
-  }, [loadProfile, loadLists, loadMode, loadSelectedGame, loadProgress]);
+  }, [loadProfile, loadLists, loadMode, loadSelectedGame, loadProgress, loadDailyRewards]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
