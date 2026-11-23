@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
@@ -9,8 +9,10 @@ import { useGameSelectionStore } from '@/stores/game-selection-store';
 import { GAME_MODES, GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
 import { GAMES, GAME_CONFIG } from '@/features/play/logic/games';
 import { Character } from '@/shared/ui/Character';
+import { StickerAlbumScreen, StreakBadge } from '@/features/rewards';
 
 export function HomeScreen() {
+  const [albumOpen, setAlbumOpen] = useState(false);
   const profile = useProfileStore((state) => state.profile);
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const mode = useGameModeStore((state) => state.mode);
@@ -27,103 +29,119 @@ export function HomeScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      <Character characterId="mama-bear" size="medium" style={styles.characterBadge} />
-      <Text style={styles.title}>Mama Bear's Spelling Bee</Text>
-      <Text style={styles.message}>
-        {profile
-          ? `Welcome back, ${profile.name}! Mama Bear missed you.`
-          : 'Mama Bear is ready to help you spell with a smile.'}
-      </Text>
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Absolutely positioned in the scroll content's top corner, so it adds no row and no scroll
+            height to this already space-constrained screen (UX Step 20). */}
+        <StreakBadge onPress={() => setAlbumOpen(true)} style={styles.streakBadge} />
 
-      <Pressable style={styles.instructionsButton} onPress={() => router.replace('/instructions')}>
-        <Text style={styles.instructionsButtonText}>📖 Instructions</Text>
-      </Pressable>
+        <Character characterId="mama-bear" size="medium" style={styles.characterBadge} />
+        <Text style={styles.title}>Mama Bear's Spelling Bee</Text>
+        <Text style={styles.message}>
+          {profile
+            ? `Welcome back, ${profile.name}! Mama Bear missed you.`
+            : 'Mama Bear is ready to help you spell with a smile.'}
+        </Text>
 
-      <Text style={styles.sectionLabel}>Choose your game</Text>
-      <View style={styles.pillRow}>
-        {GAMES.map((gameId) => {
-          const selected = gameId === selectedGame;
-          return (
-            <Pressable
-              key={gameId}
-              testID={`game-${gameId}`}
-              style={[styles.pillButton, selected && styles.gamePillSelected]}
-              onPress={() => setSelectedGame(gameId)}
-            >
-              <Text style={[styles.pillButtonText, selected && styles.pillButtonTextSelected]}>
-                {GAME_CONFIG[gameId].label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <Text style={styles.sectionLabel}>Choose your challenge</Text>
-      <View style={styles.pillRow}>
-        {GAME_MODES.map((gameMode) => {
-          const selected = gameMode === mode;
-          return (
-            <Pressable
-              key={gameMode}
-              testID={`mode-${gameMode}`}
-              style={[styles.pillButton, selected && styles.modePillSelected]}
-              onPress={() => setMode(gameMode)}
-            >
-              <Text style={[styles.pillButtonText, selected && styles.pillButtonTextSelected]}>
-                {GAME_MODE_CONFIG[gameMode].label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <Pressable testID="play-button" style={styles.playButtonWrapper} onPress={handlePlay}>
-        <View style={styles.playTriangleOutline} />
-        <View style={styles.playTriangle} />
-        <Text style={styles.playButtonText}>Play</Text>
-      </Pressable>
-      {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
-
-      <View style={styles.actionsRow}>
-        <Pressable
-          testID="lists-button"
-          style={[styles.actionButtonCompact, styles.listsButton]}
-          onPress={() => router.replace('/lists')}
-        >
-          <Text style={styles.actionButtonEmoji}>📚</Text>
-          <Text style={[styles.actionButtonLabel, styles.actionButtonLabelLight]}>Word Lists</Text>
+        <Pressable style={styles.instructionsButton} onPress={() => router.replace('/instructions')}>
+          <Text style={styles.instructionsButtonText}>📖 Instructions</Text>
         </Pressable>
 
-        <Pressable
-          testID="final-test-button"
-          style={[styles.actionButtonCompact, styles.finalTestButton]}
-          onPress={() => router.replace('/final-test')}
-        >
-          <Text style={styles.actionButtonEmoji}>🎓</Text>
-          <Text style={styles.actionButtonLabel}>Final Test</Text>
-        </Pressable>
+        <Text style={styles.sectionLabel}>Choose your game</Text>
+        <View style={styles.pillRow}>
+          {GAMES.map((gameId) => {
+            const selected = gameId === selectedGame;
+            return (
+              <Pressable
+                key={gameId}
+                testID={`game-${gameId}`}
+                style={[styles.pillButton, selected && styles.gamePillSelected]}
+                onPress={() => setSelectedGame(gameId)}
+              >
+                <Text style={[styles.pillButtonText, selected && styles.pillButtonTextSelected]}>
+                  {GAME_CONFIG[gameId].label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-        <Pressable
-          testID="parent-button"
-          style={[styles.actionButtonCompact, styles.parentButton]}
-          onPress={() => router.replace('/parent')}
-        >
-          <Text style={styles.actionButtonEmoji}>👪</Text>
-          <Text style={styles.actionButtonLabel}>Parent View</Text>
-        </Pressable>
-      </View>
+        <Text style={styles.sectionLabel}>Choose your challenge</Text>
+        <View style={styles.pillRow}>
+          {GAME_MODES.map((gameMode) => {
+            const selected = gameMode === mode;
+            return (
+              <Pressable
+                key={gameMode}
+                testID={`mode-${gameMode}`}
+                style={[styles.pillButton, selected && styles.modePillSelected]}
+                onPress={() => setMode(gameMode)}
+              >
+                <Text style={[styles.pillButtonText, selected && styles.pillButtonTextSelected]}>
+                  {GAME_MODE_CONFIG[gameMode].label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-      {profile ? (
-        <Pressable onPress={() => router.replace('/profile')}>
-          <Text style={styles.switchProfile}>Not {profile.name}? Switch profile</Text>
+        <Pressable testID="play-button" style={styles.playButtonWrapper} onPress={handlePlay}>
+          <View style={styles.playTriangleOutline} />
+          <View style={styles.playTriangle} />
+          <Text style={styles.playButtonText}>Play</Text>
         </Pressable>
-      ) : null}
-    </ScrollView>
+        {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
+
+        <View style={styles.actionsRow}>
+          <Pressable
+            testID="lists-button"
+            style={[styles.actionButtonCompact, styles.listsButton]}
+            onPress={() => router.replace('/lists')}
+          >
+            <Text style={styles.actionButtonEmoji}>📚</Text>
+            <Text style={[styles.actionButtonLabel, styles.actionButtonLabelLight]}>Word Lists</Text>
+          </Pressable>
+
+          <Pressable
+            testID="final-test-button"
+            style={[styles.actionButtonCompact, styles.finalTestButton]}
+            onPress={() => router.replace('/final-test')}
+          >
+            <Text style={styles.actionButtonEmoji}>🎓</Text>
+            <Text style={styles.actionButtonLabel}>Final Test</Text>
+          </Pressable>
+
+          <Pressable
+            testID="parent-button"
+            style={[styles.actionButtonCompact, styles.parentButton]}
+            onPress={() => router.replace('/parent')}
+          >
+            <Text style={styles.actionButtonEmoji}>👪</Text>
+            <Text style={styles.actionButtonLabel}>Parent View</Text>
+          </Pressable>
+        </View>
+
+        {profile ? (
+          <Pressable onPress={() => router.replace('/profile')}>
+            <Text style={styles.switchProfile}>Not {profile.name}? Switch profile</Text>
+          </Pressable>
+        ) : null}
+      </ScrollView>
+
+      {/* A modal over Home, not a stacked route: one tap in (the badge), one tap out (UX Step 21). */}
+      <StickerAlbumScreen
+        visible={albumOpen}
+        onClose={() => setAlbumOpen(false)}
+        onPlay={() => {
+          setAlbumOpen(false);
+          handlePlay();
+        }}
+      />
+    </>
   );
 }
 
@@ -137,6 +155,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: theme.spacing.lg,
+  },
+  streakBadge: {
+    position: 'absolute',
+    top: theme.spacing.sm,
+    right: theme.spacing.sm,
+    zIndex: 1,
   },
   characterBadge: {
     marginBottom: theme.spacing.sm,

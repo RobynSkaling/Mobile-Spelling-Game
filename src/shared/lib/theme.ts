@@ -10,6 +10,10 @@ export const theme = {
     surface: '#FFFFFF',
     text: '#111111',
     muted: '#2B2350', // Dark enough to stay readable both on white cards and directly on the blue background
+    // Soft periwinkle — calm/"resting" states only (the daily-streak grace day, UX Step 22). Never
+    // a failure color: `primary` stays reserved for wrong/miss. Provisional per UX Step 22 (flagged
+    // optional there) — swap for `muted`/lightened `secondary` if a device check says otherwise.
+    rest: '#C9C3F5',
   },
   spacing: {
     xs: 8,

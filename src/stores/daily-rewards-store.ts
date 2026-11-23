@@ -7,8 +7,8 @@ import {
   DailyStreakState,
   DEFAULT_GRACE_DAYS,
   EarnedSticker,
+  localDayKey,
   StickerAlbumState,
-  toDayKey,
 } from './daily-rewards-logic';
 import { STICKER_CATALOG } from '@/data/rewards/sticker-catalog';
 
@@ -86,11 +86,9 @@ export const useDailyRewardsStore = create<DailyRewardsStore>((set, get) => ({
 
   recordCompletedPlay: (nowMs) => {
     const { streak, album, schemaVersion } = get();
-    // Date.prototype.getTimezoneOffset() returns minutes local time is BEHIND UTC, positive for
-    // zones west of UTC (e.g. +300 for EST). toDayKey wants the conventional UTC-offset sign instead
-    // (local = UTC + tzOffsetMinutes, e.g. EST is -300), so the sign is flipped here.
-    const tzOffsetMinutes = -new Date(nowMs).getTimezoneOffset();
-    const today = toDayKey(nowMs, tzOffsetMinutes);
+    // localDayKey handles the getTimezoneOffset() sign flip toDayKey needs, and is the same helper
+    // the rewards UI uses to decide what "today" is — so recording and display always agree.
+    const today = localDayKey(nowMs);
 
     if (streak.lastPlayedDay === today) {
       // First completion of the day already recorded — debounced to once per DayKey (27.6): no

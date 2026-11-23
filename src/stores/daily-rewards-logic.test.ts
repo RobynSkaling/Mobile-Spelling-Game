@@ -5,6 +5,8 @@ import {
   DailyStreakState,
   dayGap,
   dailyRewardsKey,
+  getStreakStatus,
+  localDayKey,
   toDayKey,
 } from './daily-rewards-logic';
 
@@ -119,6 +121,52 @@ describe('applyCompletedSession', () => {
     const outcome = applyCompletedSession(streak, '2026-09-27', { graceDays: 1 });
     assert.equal(outcome.qualifiesToday, false);
     assert.deepEqual(outcome.streak, streak);
+  });
+});
+
+describe('getStreakStatus', () => {
+  const played = (overrides: Partial<DailyStreakState> = {}) =>
+    freshStreak({ current: 3, longest: 5, lastPlayedDay: '2026-09-28', graceRemaining: 1, ...overrides });
+
+  it('is new before any play has ever been recorded', () => {
+    assert.equal(getStreakStatus(freshStreak(), '2026-09-28'), 'new');
+  });
+
+  it('is active on the day of the last play', () => {
+    assert.equal(getStreakStatus(played(), '2026-09-28'), 'active');
+  });
+
+  it('is active the day after the last play (streak alive, not yet played today)', () => {
+    assert.equal(getStreakStatus(played(), '2026-09-29'), 'active');
+  });
+
+  it('is resting when the missed days are all covered by grace', () => {
+    assert.equal(getStreakStatus(played(), '2026-09-30'), 'resting');
+  });
+
+  it('is lapsed when the missed days exceed grace', () => {
+    assert.equal(getStreakStatus(played(), '2026-10-01'), 'lapsed');
+  });
+
+  it('is lapsed after a single missed day once grace has already been spent', () => {
+    assert.equal(getStreakStatus(played({ graceRemaining: 0 }), '2026-09-30'), 'lapsed');
+  });
+
+  it('reads a clock moved backward as active, matching applyCompletedSession\'s preserve-the-streak clamp', () => {
+    assert.equal(getStreakStatus(played(), '2026-09-20'), 'active');
+  });
+
+  it('agrees with applyCompletedSession: resting keeps current on the next play, lapsed restarts it', () => {
+    const tuning = { graceDays: 1 };
+    assert.equal(applyCompletedSession(played(), '2026-09-30', tuning).streak.current, 3);
+    assert.equal(applyCompletedSession(played(), '2026-10-01', tuning).streak.current, 1);
+  });
+});
+
+describe('localDayKey', () => {
+  it("matches toDayKey with the host's own (sign-flipped) offset", () => {
+    const nowMs = Date.parse('2026-09-28T23:30:00.000Z');
+    assert.equal(localDayKey(nowMs), toDayKey(nowMs, -new Date(nowMs).getTimezoneOffset()));
   });
 });
 

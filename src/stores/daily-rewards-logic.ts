@@ -66,6 +66,15 @@ export function toDayKey(nowMs: number, tzOffsetMinutes: number): DayKey {
   return `${year}-${month}-${day}`;
 }
 
+/** The device's own local calendar day for `nowMs`. `Date.prototype.getTimezoneOffset()` returns
+ *  minutes local time is BEHIND UTC (positive west of UTC, e.g. +300 for EST), so the sign is
+ *  flipped here to match toDayKey's conventional UTC-offset sign. The one place the host timezone
+ *  is read — the store (recording a play) and the rewards UI (displaying status) both go through
+ *  this, so they can never disagree about what "today" is. */
+export function localDayKey(nowMs: number): DayKey {
+  return toDayKey(nowMs, -new Date(nowMs).getTimezoneOffset());
+}
+
 /** Whole-calendar-day gap between two day keys (0 = same day, 1 = consecutive, negative = `to` is
  *  before `from`). Compares calendar days as UTC midnight timestamps, NOT raw ms subtraction of the
  *  original `nowMs` values, so DST and offset shifts can't miscount (architecture 27.5). */
@@ -137,6 +146,36 @@ export function applyCompletedSession(
   // Past grace: the streak lapses, but restarts at 1 immediately rather than displaying a
   // punishing "0" — the "let's start a fresh streak together" tone (UX Step 22).
   return { streak: freshStreak(), qualifiesToday: true };
+}
+
+/**
+ * How the streak should *read* today, before any play has been recorded for today (UX Steps 20-22):
+ * - `new`     — never played; nothing to show yet but an invitation.
+ * - `active`  — played today or yesterday; the streak is alive.
+ * - `resting` — one or more days missed, but all still covered by banked grace days (the
+ *               "resting bee"). The next completed play keeps `current`.
+ * - `lapsed`  — missed more days than grace covers. The stored `current` is stale; the next play
+ *               restarts at 1, so the UI must show a fresh-start invitation, never a "0" or the
+ *               stale number (UX Step 22).
+ *
+ * Pure, and deliberately mirrors applyCompletedSession's gap/grace rules so the badge can never
+ * promise a streak that the next play would actually reset (or vice versa). A clock moved backward
+ * (gap < 0) reads as `active`, matching applyCompletedSession's "err toward preserving" clamp.
+ */
+export type StreakStatus = 'new' | 'active' | 'resting' | 'lapsed';
+
+export function getStreakStatus(streak: DailyStreakState, today: DayKey): StreakStatus {
+  if (streak.lastPlayedDay === null) {
+    return 'new';
+  }
+
+  const gap = dayGap(streak.lastPlayedDay, today);
+  if (gap <= 1) {
+    return 'active';
+  }
+
+  const missedDays = gap - 1;
+  return missedDays <= streak.graceRemaining ? 'resting' : 'lapsed';
 }
 
 /**
