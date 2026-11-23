@@ -4,26 +4,26 @@ import { StreakStatus } from '@/stores/daily-rewards-logic';
 import {
   FIRST_STREAK_CAPTION,
   FRESH_START_CAPTION,
-  getBadgeAccessibilityLabel,
-  getBadgeLabel,
+  getAlbumAccessibilityLabel,
+  getAlbumStreakLabel,
   getStreakBanner,
   RESTING_CAPTION,
 } from './streak-display';
 
 const ALL_STATUSES: StreakStatus[] = ['new', 'active', 'resting', 'lapsed'];
 
-describe('getBadgeLabel', () => {
+describe('getAlbumStreakLabel', () => {
   it('shows the day count for a live streak, active or resting', () => {
-    assert.equal(getBadgeLabel('active', 5), 'x5');
-    assert.equal(getBadgeLabel('resting', 5), 'x5');
+    assert.equal(getAlbumStreakLabel('active', 5), 'x5');
+    assert.equal(getAlbumStreakLabel('resting', 5), 'x5');
   });
 
-  it('shows an invitation, not the stale count, once a streak has lapsed', () => {
-    assert.equal(getBadgeLabel('lapsed', 12), 'Start!');
+  it('shows nothing, not the stale count, once a streak has lapsed', () => {
+    assert.equal(getAlbumStreakLabel('lapsed', 12), null);
   });
 
-  it('shows an invitation for a brand-new player', () => {
-    assert.equal(getBadgeLabel('new', 0), 'Start!');
+  it('shows nothing for a brand-new player', () => {
+    assert.equal(getAlbumStreakLabel('new', 0), null);
   });
 });
 
@@ -55,7 +55,7 @@ describe('no punishing "0" anywhere (UX Step 22)', () => {
       // `new`/`lapsed` may carry a stored 0 or a stale number; neither may surface as "0".
       const current = status === 'new' || status === 'lapsed' ? 0 : 1;
       const banner = getStreakBanner(status, current);
-      const texts = [getBadgeLabel(status, current), getBadgeAccessibilityLabel(status, current), banner.headline, banner.caption ?? ''];
+      const texts = [getAlbumStreakLabel(status, current) ?? '', getAlbumAccessibilityLabel(status, current), banner.headline, banner.caption ?? ''];
       for (const text of texts) {
         assert.doesNotMatch(text, /\b0\b/, `${status}: "${text}"`);
       }
@@ -63,14 +63,25 @@ describe('no punishing "0" anywhere (UX Step 22)', () => {
   });
 });
 
-describe('getBadgeAccessibilityLabel', () => {
-  it('tells a screen-reader user where the badge goes in every state', () => {
+describe('getAlbumAccessibilityLabel', () => {
+  it('always names the Sticker Album, never "Start!"', () => {
     for (const status of ALL_STATUSES) {
-      assert.match(getBadgeAccessibilityLabel(status, 3), /sticker book/);
+      const label = getAlbumAccessibilityLabel(status, 3);
+      assert.match(label, /^Sticker Album\./);
+      assert.doesNotMatch(label, /Start/);
     }
   });
 
+  it('adds the streak on an active streak', () => {
+    assert.equal(getAlbumAccessibilityLabel('active', 5), 'Sticker Album. 5-Day Streak.');
+  });
+
   it('says the streak is resting on a grace day', () => {
-    assert.match(getBadgeAccessibilityLabel('resting', 3), /resting/);
+    assert.equal(getAlbumAccessibilityLabel('resting', 5), 'Sticker Album. 5-Day Streak, resting today.');
+  });
+
+  it('is just the name for a new or lapsed streak', () => {
+    assert.equal(getAlbumAccessibilityLabel('new', 0), 'Sticker Album.');
+    assert.equal(getAlbumAccessibilityLabel('lapsed', 12), 'Sticker Album.');
   });
 });

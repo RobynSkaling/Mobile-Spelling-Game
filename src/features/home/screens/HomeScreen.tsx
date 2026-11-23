@@ -9,7 +9,7 @@ import { useGameSelectionStore } from '@/stores/game-selection-store';
 import { GAME_MODES, GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
 import { GAMES, GAME_CONFIG } from '@/features/play/logic/games';
 import { Character } from '@/shared/ui/Character';
-import { StickerAlbumScreen, StreakBadge } from '@/features/rewards';
+import { StickerAlbumScreen, StickerAlbumButton } from '@/features/rewards';
 
 export function HomeScreen() {
   const [albumOpen, setAlbumOpen] = useState(false);
@@ -35,21 +35,8 @@ export function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Absolutely positioned in the scroll content's top corner, so it adds no row and no scroll
-            height to this already space-constrained screen (UX Step 20). */}
-        <StreakBadge onPress={() => setAlbumOpen(true)} style={styles.streakBadge} />
-
         <Character characterId="mama-bear" size="medium" style={styles.characterBadge} />
         <Text style={styles.title}>Mama Bear's Spelling Bee</Text>
-        <Text style={styles.message}>
-          {profile
-            ? `Welcome back, ${profile.name}! Mama Bear missed you.`
-            : 'Mama Bear is ready to help you spell with a smile.'}
-        </Text>
-
-        <Pressable style={styles.instructionsButton} onPress={() => router.replace('/instructions')}>
-          <Text style={styles.instructionsButtonText}>📖 Instructions</Text>
-        </Pressable>
 
         <Text style={styles.sectionLabel}>Choose your game</Text>
         <View style={styles.pillRow}>
@@ -96,10 +83,27 @@ export function HomeScreen() {
         </Pressable>
         {selectedList ? <Text style={styles.selectedListLabel}>Playing: {selectedList.name}</Text> : null}
 
+        <View style={styles.secondaryRow}>
+          <Pressable
+            testID="final-test-button"
+            accessibilityRole="button"
+            accessibilityLabel="Final Test"
+            style={[styles.secondaryButton, styles.finalTestButton]}
+            onPress={() => router.replace('/final-test')}
+          >
+            <Text style={styles.secondaryEmoji}>🎓</Text>
+            <Text style={styles.secondaryLabel}>Final Test</Text>
+          </Pressable>
+
+          <StickerAlbumButton onPress={() => setAlbumOpen(true)} />
+        </View>
+
         <View style={styles.actionsRow}>
           <Pressable
             testID="lists-button"
-            style={[styles.actionButtonCompact, styles.listsButton]}
+            accessibilityRole="button"
+            accessibilityLabel="Word Lists"
+            style={[styles.actionButtonSquare, styles.listsButton]}
             onPress={() => router.replace('/lists')}
           >
             <Text style={styles.actionButtonEmoji}>📚</Text>
@@ -107,17 +111,21 @@ export function HomeScreen() {
           </Pressable>
 
           <Pressable
-            testID="final-test-button"
-            style={[styles.actionButtonCompact, styles.finalTestButton]}
-            onPress={() => router.replace('/final-test')}
+            testID="instructions-button"
+            accessibilityRole="button"
+            accessibilityLabel="Instructions"
+            style={[styles.actionButtonSquare, styles.instructionsButton]}
+            onPress={() => router.replace('/instructions')}
           >
-            <Text style={styles.actionButtonEmoji}>🎓</Text>
-            <Text style={styles.actionButtonLabel}>Final Test</Text>
+            <Text style={styles.actionButtonEmoji}>📖</Text>
+            <Text style={styles.actionButtonLabel}>Instructions</Text>
           </Pressable>
 
           <Pressable
             testID="parent-button"
-            style={[styles.actionButtonCompact, styles.parentButton]}
+            accessibilityRole="button"
+            accessibilityLabel="Parent View"
+            style={[styles.actionButtonSquare, styles.parentButton]}
             onPress={() => router.replace('/parent')}
           >
             <Text style={styles.actionButtonEmoji}>👪</Text>
@@ -132,7 +140,7 @@ export function HomeScreen() {
         ) : null}
       </ScrollView>
 
-      {/* A modal over Home, not a stacked route: one tap in (the badge), one tap out (UX Step 21). */}
+      {/* A modal over Home, not a stacked route: one tap in (the Sticker Album button), one tap out (UX Step 21). */}
       <StickerAlbumScreen
         visible={albumOpen}
         onClose={() => setAlbumOpen(false)}
@@ -154,13 +162,8 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: theme.spacing.lg,
-  },
-  streakBadge: {
-    position: 'absolute',
-    top: theme.spacing.sm,
-    right: theme.spacing.sm,
-    zIndex: 1,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
   },
   characterBadge: {
     marginBottom: theme.spacing.sm,
@@ -171,26 +174,6 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     textAlign: 'center',
     marginBottom: theme.spacing.xs,
-  },
-  message: {
-    fontSize: 14,
-    color: theme.colors.text,
-    textAlign: 'center',
-    marginBottom: theme.spacing.sm,
-  },
-  instructionsButton: {
-    marginBottom: theme.spacing.sm,
-    backgroundColor: theme.colors.surface,
-    paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: 999,
-    borderWidth: 3,
-    borderColor: '#111111',
-  },
-  instructionsButtonText: {
-    color: theme.colors.text,
-    fontSize: 14,
-    fontWeight: '700',
   },
   sectionLabel: {
     fontSize: 13,
@@ -235,7 +218,6 @@ const styles = StyleSheet.create({
     color: theme.colors.surface,
   },
   playButtonWrapper: {
-    marginTop: theme.spacing.xs,
     width: 150,
     height: 128,
     alignItems: 'center',
@@ -283,21 +265,22 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   selectedListLabel: {
-    marginTop: theme.spacing.sm,
+    marginTop: theme.spacing.xs,
     color: theme.colors.muted,
     fontWeight: '600',
   },
-  // Word Lists / Final Test / Parent View as one horizontal row of compact icon+label buttons
-  // instead of three stacked full-width pills — reclaims a lot of vertical space so Parent View
-  // stays reachable without heavy scrolling, even after the game-picker row above added height.
-  actionsRow: {
-    marginTop: theme.spacing.md,
+  // Final Test + Sticker Album: equal-size secondary actions directly under Play — smaller than
+  // Play, larger than the bottom row (Epic 27). Same row width as the bottom row so they line up.
+  secondaryRow: {
+    marginTop: theme.spacing.sm,
     flexDirection: 'row',
-    justifyContent: 'center',
+    alignSelf: 'stretch',
+    maxWidth: 320,
     gap: theme.spacing.sm,
   },
-  actionButtonCompact: {
-    width: 92,
+  secondaryButton: {
+    flex: 1,
+    minHeight: 72,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: theme.spacing.xs,
@@ -306,8 +289,39 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#111111',
   },
-  actionButtonEmoji: {
+  secondaryEmoji: {
     fontSize: 22,
+    height: 28,
+    lineHeight: 28,
+  },
+  secondaryLabel: {
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '800',
+    color: theme.colors.text,
+    textAlign: 'center',
+  },
+  // Word Lists / Instructions / Parent View as three equal squares (width-driven via flex +
+  // aspectRatio) so they stay square from 320 up to the row's max width.
+  actionsRow: {
+    marginTop: theme.spacing.md,
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    maxWidth: 320,
+    gap: theme.spacing.sm,
+  },
+  actionButtonSquare: {
+    flex: 1,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  actionButtonEmoji: {
+    fontSize: 24,
   },
   actionButtonLabel: {
     marginTop: 2,
@@ -321,6 +335,9 @@ const styles = StyleSheet.create({
   },
   listsButton: {
     backgroundColor: theme.colors.secondary,
+  },
+  instructionsButton: {
+    backgroundColor: theme.colors.surface,
   },
   finalTestButton: {
     backgroundColor: theme.colors.gold,

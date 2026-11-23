@@ -1,2 +1,2 @@
-export * from './components/StreakBadge';
+export * from './components/StickerAlbumButton';
 export * from './screens/StickerAlbumScreen';

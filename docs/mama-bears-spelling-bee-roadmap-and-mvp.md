@@ -1431,6 +1431,41 @@ Make Home calmer and more focused: one obvious primary action (Play), two clear 
 
 Nothing. **First in the Phase 3 build order** (UI/UX first).
 
+#### Revised: Implemented
+
+All tasks above are built and verified, except the stakeholder review package and the screenshot task, which were deliberately skipped (see below). What actually landed:
+
+- **Home layout** (`HomeScreen.tsx`): welcome message removed (both variants); top "📖 Instructions" pill removed; corner badge removed. Directly under Play (and its "Playing: {list}" label) sit **Final Test** (`gold`, 🎓) and **Sticker Album** side by side, equal width and equal height (`flex: 1`, 72pt min height). The bottom row is three equal **squares** (`flex: 1` + `aspectRatio: 1`, row capped at 320 wide): Word Lists, Instructions (new 📖 square), Parent View. Mama Bear, title, game picker, challenge picker and "Not {name}? Switch profile" are untouched, as the open question recommended.
+- **Sticker Album button** (`src/features/rewards/components/StickerAlbumButton.tsx`, replacing `StreakBadge.tsx`): always labelled "Sticker Album". The icon line shows 📒 plus a small "🐝 x5" chip while a streak is active. On a grace day the button turns the `rest` tone and the chip shows the tilted sleepy bee with "zzz". New and lapsed streaks show no chip, never "0". It uses `accent` (hot pink) when not resting, never `primary` Tomato. It opens the same `StickerAlbumScreen` modal as before; Back to Play and ✕ are unchanged. The icon line has a fixed height, so the button is the same size with or without the chip and the row doesn't jump.
+- **Copy logic stays pure and tested** (`streak-display.ts`): `getBadgeLabel` became `getAlbumStreakLabel` (returns `null` for new/lapsed instead of "Start!"), and `getBadgeAccessibilityLabel` became `getAlbumAccessibilityLabel` ("Sticker Album. 5-Day Streak." / "... , resting today." / "Sticker Album."). `getStreakStatus` and `useStreakStatus` are reused unchanged. The never-show-"0" sweep test is kept and extended to the new helpers.
+- **Accessibility**: every Home button now has `accessibilityRole="button"` and an explicit label. Final Test and Sticker Album are 72pt tall; the bottom squares are about 82pt at 320 wide. All are above the 44pt target. (The pre-existing game/challenge pills measure 41px in web and were not changed.)
+- **Spacing pass**: scroll content padding went from `lg` all round to `md` vertical and `lg` horizontal; the Play button's extra top margin was dropped; the "Playing:" label margin went from `sm` to `xs`. All values are `theme.spacing` tokens, with no new colours. Needed so that Play, Final Test and Sticker Album fit above the fold at 375×667.
+
+**Judgment calls:**
+
+- The album icon is 📒. The product spec didn't name one, so it is a placeholder that is easy to change.
+- Sticker Album uses `accent` pink rather than `gold`, so it reads as distinct from the neighbouring gold Final Test. The `rest` tone replaces it on a grace day.
+- The button renders (with no chip) before the streak store hydrates, rather than rendering nothing like the old badge, because it is a navigation button and must always be present.
+- The "Playing: {list}" label stays between Play and the two secondary buttons, so it still sits with the Play button.
+
+**Verification:**
+
+- `npm test`: 156/156 (154 before; 2 net new in `streak-display.test.ts`). `npx tsc --noEmit` is clean. `npx expo export --platform web` builds (exported to a scratch directory, not `dist/`).
+- **Home scroll height** (headless Chrome, web export):
+
+  | Viewport | Before | After |
+  |---|---|---|
+  | 320×568 | 847px | 814px |
+  | 375×667 | 779px | 781px |
+
+  At 375×667 the total is flat, because the new square bottom row is taller than the old compact one and the Instructions pill is gone. What matters is that the primary actions moved up: **at 375×667, Play spans y=411–539 and Final Test / Sticker Album end at y=650, so all three are visible without scrolling** (viewport 667). At 320×568 the secondary pair sits at y=627–699, so it needs a scroll, as expected on the smallest phone. Everything is reachable.
+- All four streak states (new, active, resting, lapsed) were rendered and checked at 320×568 and 375×667. The accessibility labels and visible text matched the spec in each. Equal secondary-button sizes (130×72 at 320, 154×72 at 375) were confirmed by measurement.
+
+**Not done, stated plainly:**
+
+- **The stakeholder review package** (screenshots at 320×568, 375×667 and 768×1024, plus a before/after comparison) was **deliberately skipped**. The product owner is producing it outside this project. The screenshots taken were for engineering verification only.
+- **No native iOS/Android device test** was done. The checks above are web-export only, so real-device legibility of the streak chip and the tablet (768×1024) layout are still owed.
+
 ---
 
 ### Epic 28 — Phase 3 Screen Mockups for Stakeholder Review (Front End Only)
