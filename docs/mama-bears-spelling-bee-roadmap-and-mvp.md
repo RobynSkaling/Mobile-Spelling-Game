@@ -1341,23 +1341,23 @@ All tasks above are built and verified. What actually landed:
 
 #### Open Items Carried Forward
 
-- **Grace-day policy is still Epic 25's placeholder** (1 day, not replenished mid-streak). The UI now makes it visible, so product/UX should confirm it before launch. **Update:** product has since decided on age-based grace (14 days for 5 and under, 7 for 6+) — see Epic 32.
+- **Grace-day policy is still Epic 25's placeholder** (1 day, not replenished mid-streak). The UI now makes it visible, so product/UX should confirm it before launch. **Update:** product has since decided on age-based grace (14 days for 5 and under, 7 for 6+) — see Epic 33.
 - **Whether to surface streak status in Parent View** (UX Step 22 confusion point) — not done; out of this epic's scope.
 - **Day-one discouragement check** (UX Step 21 confusion point): with the 7-sticker placeholder catalog, day one shows 1 earned + 6 silhouettes. Revisit when the real catalog size is decided.
 
 
 ---
 
-## 13. Epics 27–35 — Phase 3: UI/UX First, then Families and Rewards Content
+## 13. Epics 27–36 — Phase 3: Fix Gameplay First, then Families and Rewards Content
 
 Phase 3's goal (Section 2) is to "make the app useful for real families and schools" and "improve retention across months, not just days." The biggest gap against that goal: the app supports **one child per device** today (`profile-store.ts` holds a single `profile`; progress, streaks, and stickers are stored per device). This section turns the product owner's Phase 3 direction into sequenced epics:
 
-- **Families:** a parent account that owns purchases, multiple children each with their own profile and data, and per-child parent reports (Epics 29–31, 35).
-- **Rewards content:** age-based grace days (Epic 32), a 50-sticker core catalog (Epic 33), and 20 holiday stickers in a collection model that can grow (Epic 34).
-- **Home cleanup:** a cleaner, minimalist Home screen, with the corner streak badge replaced by a named Sticker Album button under Play (Epic 27).
-- **Mockups for stakeholder review:** clickable front-end versions of every new Phase 3 screen, using sample data (Epic 28).
+- **Families:** a parent account that owns purchases, multiple children each with their own profile and data, and per-child parent reports (Epics 30–32, 36).
+- **Rewards content:** age-based grace days (Epic 33), a 50-sticker core catalog (Epic 34), and 20 holiday stickers in a collection model that can grow (Epic 35).
+- **Gameplay fixes (top priority):** Honey Pot Flick is unplayable (Epic 28) and Bee Line is too cramped to play (Epic 29).
+- **Home cleanup:** a cleaner, minimalist Home screen, with the corner streak badge replaced by a named Sticker Album button under Play (Epic 27 — done).
 
-**UI/UX first.** The product owner has prioritised front-end look-and-feel ahead of back-end work, so stakeholders can review real screens early. Epics 27 and 28 are front-end only and come first. Changes to layout and flow are cheapest at this point, before Epics 29–35 build data, migrations and purchases underneath. Each later epic then wires up the **approved** screens from Epic 28 instead of designing them from scratch. (Epics 28–34 in the first draft of this section moved to 29–35 when the mockup epic was inserted.)
+**Gameplay first.** Both games are currently broken or unplayable on a phone (reported by the product owner in testing). A spelling game whose games don't work blocks every other kind of value, so **Epics 28 and 29 come before all other remaining epics**. Families and rewards work (Epics 30–36) waits until both games pass their acceptance criteria. (The clickable-mockups epic from an earlier draft was dropped at the product owner's request; later epics were renumbered: Parent account is now Epic 30, and so on through Purchases, now Epic 36.)
 
 Each epic carries **acceptance criteria** (what "done" means to product) as well as tasks, so engineering and QA share one definition of done.
 
@@ -1368,22 +1368,23 @@ These shape several epics, so they are stated once here rather than buried:
 1. **The parent account is local to the device, not a cloud login.** The architecture requires the app to work fully offline with no backend (architecture Section 3). So "parent login" means a parent area on the device protected by a parent PIN, which owns the child profiles, settings, and purchases. A cloud account with email sign-in that syncs across devices would need a backend, a privacy policy, and child-data compliance work (COPPA in the US, GDPR-K in the EU/UK). That is a separate decision, listed under "Deferred" below and not broken down here.
 2. **Children don't have passwords.** For ages 5–9, "logging in" is a "Who's playing?" screen: tap your avatar. Children can't reach parent areas or purchases without the parent PIN.
 3. **The app never collects or stores card details.** "The parent has the payment information" is met by having all purchases go through the Apple App Store / Google Play, made from behind the parent gate. The store holds the payment method; the app only records what has been unlocked. Kids' apps must use store in-app purchase for digital content, and Apple's Kids Category requires a parental gate in front of purchases.
-4. **Age is stored as birth month + birth year, not a full date of birth.** That's enough to work out age (Epic 32) and keeps the child data we hold to a minimum.
-5. **"Grace period" means the longest gap a child can miss and keep their streak, and it resets each time they play.** Ages 5 and under: up to 14 missed days in a row. Ages 6+: up to 7. This **replaces** Epic 25's placeholder rule (one grace day per streak, never refilled). A 2-week allowance that could only be used once per streak would surprise parents. See Epic 32.
+4. **Age is stored as birth month + birth year, not a full date of birth.** That's enough to work out age (Epic 33) and keeps the child data we hold to a minimum.
+5. **"Grace period" means the longest gap a child can miss and keep their streak, and it resets each time they play.** Ages 5 and under: up to 14 missed days in a row. Ages 6+: up to 7. This **replaces** Epic 25's placeholder rule (one grace day per streak, never refilled). A 2-week allowance that could only be used once per streak would surprise parents. See Epic 33.
 
 ### Sequencing
 
 | Order | Epic | Depends on | Notes |
 |---|---|---|---|
-| 1 | 27 — Home cleanup (**front end**) | — | Real layout fix on the live Home screen; first thing stakeholders review |
-| 2 | 28 — Phase 3 screen mockups (**front end**) | 27 | Clickable screens with sample data; **stakeholder sign-off gates 29–35** |
-| 3 | 29 — Parent account & child profiles | 28 | Wires up the approved screens; foundation for 30–32 and 35 |
-| 4 | 30 — Per-child data | 29 | Engineering-heavy: every store becomes per-child, plus migration |
-| 5 | 31 — Per-child parent reports | 29, 30 | Wires up the approved reports mockup |
-| 6 | 32 — Age-based grace days | 29 (needs age) | The config file can land earlier, with the default value |
-| 7 | 33 — 50-sticker core catalog & collections | 28 (album design) | Content-heavy (50 names and captions); can run in parallel with 29–31 |
-| 8 | 34 — Holiday sticker collections | 33 | |
-| 9 | 35 — Parent purchases & unlocks | 29 | **Blocked on a product decision:** what is sold (see epic) |
+| ✅ | 27 — Home cleanup | — | Done |
+| 1 | **28 — Fix Honey Pot Flick (P0)** | — | Game is unplayable: letters off-screen, can't aim/flick |
+| 2 | **29 — Fix Bee Line letter field (P0)** | — | Letters too big and crowded, play area too small; can run in parallel with 28 |
+| 3 | 30 — Parent account & child profiles | 28, 29 (games playable) | Foundation for 31–33 and 36 |
+| 4 | 31 — Per-child data | 30 | Engineering-heavy: every store becomes per-child, plus migration |
+| 5 | 32 — Per-child parent reports | 30, 31 | |
+| 6 | 33 — Age-based grace days | 30 (needs age) | The config file can land earlier, with the default value |
+| 7 | 34 — 50-sticker core catalog & collections | — | Content-heavy (50 names and captions); can run in parallel with 30–32 |
+| 8 | 35 — Holiday sticker collections | 34 | |
+| 9 | 36 — Parent purchases & unlocks | 30 | **Blocked on a product decision:** what is sold (see epic) |
 
 ---
 
@@ -1411,7 +1412,7 @@ Make Home calmer and more focused: one obvious primary action (Play), two clear 
 - No other information is lost: game picker, challenge picker, and the "Playing: {list}" label stay.
 - Everything is still reachable on the smallest supported phone (320×568). **Play, Final Test and Sticker Album are visible without scrolling at 375×667.** Engineering reports the measured scroll height before and after (Home measured 847px at 320×568 in Epic 26).
 - Every button keeps a touch target of at least 44pt and a screen-reader label.
-- **Stakeholder review package:** screenshots of the new Home at 320×568, 375×667 and tablet (768×1024), showing the four streak states on the Sticker Album button (new, active, resting, lapsed), plus a short before/after comparison. Stakeholders sign off before Epic 28 builds on this layout.
+- **Stakeholder review package:** screenshots of the new Home at 320×568, 375×667 and tablet (768×1024), showing the four streak states on the Sticker Album button (new, active, resting, lapsed), plus a short before/after comparison. Stakeholders sign off on the new layout.
 
 #### Tasks
 
@@ -1422,7 +1423,7 @@ Make Home calmer and more focused: one obvious primary action (Play), two clear 
 
 #### Open Questions
 
-- Should "Not {name}? Switch profile" stay until Epic 29 replaces it with the child avatar chip? **Recommendation:** yes. Epic 29 removes it.
+- Should "Not {name}? Switch profile" stay until Epic 30 replaces it with the child avatar chip? **Recommendation:** yes. Epic 30 removes it.
 - Any further minimalism (e.g. dropping the title text under Mama Bear)? Not in scope unless product asks.
 - **Final Test and Sticker Album side by side, or stacked?** Both were asked for "under Play". Side by side keeps both right under Play and saves height on small phones; stacked (Play → Final Test → Sticker Album) makes each button wider. **Recommendation:** side by side. Product to confirm.
 - **This changes UX Step 20** (a small corner badge, deliberately kept apart from Play). Product has chosen a named button under Play instead, to make the album easier to find. UX should check that the streak count on the button stays glanceable and doesn't compete with Play.
@@ -1468,53 +1469,104 @@ All tasks above are built and verified, except the stakeholder review package an
 
 ---
 
-### Epic 28 — Phase 3 Screen Mockups for Stakeholder Review (Front End Only)
+### Epic 28 — Fix Honey Pot Flick: Letters Off-Screen, Can't Aim or Flick (P0)
 
 #### Objective
 
-Build the look and flow of **every new Phase 3 screen** as real, clickable front-end screens with sample data, so stakeholders can review and approve the design **before** any back-end work starts (Epics 29–35). Nothing in this epic stores data or changes how the live app behaves.
+Make Honey Pot Flick playable again. It used to work well; now a child sees the honey pot but **no letters**, and can't aim or flick. This is the original core game, so it comes before all other remaining work.
 
-#### User Stories
+#### What's Wrong (Reported, Then Reproduced)
 
-- As a stakeholder, I want to click through the new family, parent-report and sticker screens on a phone-sized view, so I can give feedback on look and flow while it's still cheap to change.
-- As the engineer building Epics 29–35, I want approved screens to wire up, so I'm not designing and building at the same time.
+- **Product owner, testing in the web preview (Edge):** the letters don't show up on the screen, and aiming or flicking the honey pot doesn't seem to work.
+- **Reproduced by PM in a headless-Chrome check of the current build at 375×667 (a typical phone):** there are **no JavaScript errors**. The letter tiles *are* rendered, but the screen is now **taller than the phone**, so the letter tray sits **below the bottom edge of the screen**, and the top is clipped too (the "HONEY SAVED" label is cut off behind the Back button). With the letters out of view, there is nothing to pick up and flick, which explains both symptoms.
+- **Likely cause (for engineering to confirm):** the screen has gained elements over several epics (character row, honey larder, hint and megaphone buttons) without the layout being re-checked on a phone-sized screen, until the letters were pushed out of view. Epic 25's change to `PlayScreen.tsx` was only two lines (one import, one call) and is not the cause.
+
+#### User Story
+
+As a child aged 5–9, I want to see all my letters and flick them into the honey pot, so I can spell the word the way the game used to work.
 
 #### Acceptance Criteria
 
-- **Screens built in the app's real style** (theme colours, thick black borders, emoji placeholders, same components as live screens), driven by **sample data only**:
-  1. **Parent setup:** create the parent PIN (enter twice) → add the first child (name, avatar, birth month/year).
-  2. **Parent gate:** PIN entry, and the "Forgot PIN?" adult challenge.
-  3. **"Who's playing?":** 2–6 children as large avatar tiles.
-  4. **Home with the child avatar chip** top-left (built on Epic 27's layout).
-  5. **Manage children:** list, add, edit, and remove (with the "this deletes their progress" confirmation).
-  6. **Parent reports with the child switcher:** every section from Epic 31 (summary, tricky words, recent sessions, streak, stickers, Final Test history, most-played game), plus the empty state for a child with no play yet.
-  7. **Sticker Album, redesigned:** a Core section with 50 slots and holiday sections (one in season, one showing "Comes back in October!"), milestone frames, and a duplicate ×2 badge.
-  8. **Purchase / Restore screen** in the parent area. It's a layout only: no real store connection, and wording stays generic until the Epic 35 "what is sold" decision.
-- **Sample-data scenarios** that can be switched in the mockup: a single child; three children of different ages (one 5-year-old on a grace day, one 7-year-old with a long streak, one brand-new); and an empty first-launch family.
-- **Reachable without disturbing the live app:** a mockup gallery screen (e.g. a `/mockups` route available only in development builds and the web preview) lists every screen above. The live Home, play, and parent flows are unchanged.
-- **Reviewable remotely:** runs in the web preview at phone size (375×667) and tablet size (768×1024). A screenshot set of every screen and scenario is produced for stakeholders who can't run it.
-- Every mockup screen meets the same basics as the live app: touch targets of at least 44pt, screen-reader labels, readable at 320pt wide, and no Tomato red for anything that isn't a wrong answer.
-- **Feedback is captured and resolved:** stakeholder comments are recorded per screen (in the PR or a review doc). Each one is either changed in the mockup or carried as an explicit open question on the relevant later epic. Sign-off is recorded before Epics 29–35 start.
+- **Everything needed to play is on screen at once, with no scrolling:** the word prompt, the honey pot target, and **all** letter tiles. Checked at 320×568 (smallest phone), 375×667 (typical phone), and 768×1024 (tablet), with the longest words in the built-in lists (11+ letters, e.g. "achievement") in every challenge mode (Easy, Hard, Crazy!, Impossible!!).
+- **Nothing is clipped or overlapped** at the top or bottom of the screen: Back, the Honey Saved larder, the hint and megaphone buttons, and the characters all sit fully on screen without covering each other.
+- **Aim and flick work:** a child can press a letter, drag to aim, and release towards the pot. A flick at the pot with the right letter is accepted; a wrong letter or a miss gives the existing gentle feedback. Works with touch on a phone and with a mouse in the web preview.
+- **The full loop works end to end:** spell a whole word → celebration → next word, and finishing a word still counts for the daily streak and stickers (Epic 25).
+- **Root cause found and written down:** the "Revised: Implemented" notes say what caused the break and which epic introduced it, so it isn't repeated.
+- **A guard so it can't silently happen again:** a repeatable layout check (e.g. a headless-browser smoke test script in the repo, runnable with one command) that fails if any letter tile, the pot, or the prompt is off-screen at 320×568 or 375×667.
+- **Checked on a real phone** as well as the web preview, since the bug was found by playing.
 
 #### Tasks
 
-- Mockup gallery route and screen (development/web preview only).
-- Sample-data fixtures (families, children, sessions, word stats, streaks, albums) in one file, typed with the planned Epic 29–33 data shapes so the later epics can reuse the types.
-- Build screens 1–8 as presentational components that take data through props (no store reads), so Epics 29–35 can connect them to real stores without restyling.
-- Screenshot run of every screen × scenario at 375×667 and 768×1024 (the headless-browser approach used to verify Epic 26).
+- Reproduce at the three sizes and find which elements push the letter tray off-screen.
+- Rework the screen layout so the play area (pot + letters) gets the space it needs first, and secondary elements (characters, larder, hint/megaphone) shrink, move, or tuck away on small screens. Respect safe areas (notch and home bar).
+- Confirm the flick gesture works once letters are reachable. If aiming is still broken, fix the gesture separately (e.g. the gesture area conflicting with scrolling).
+- Add the layout smoke check and document how to run it.
 
 #### Open Questions
 
-- Avatars: emoji placeholders, or does art provide child-avatar artwork in time for review? **Recommendation:** emoji, labelled as placeholder.
-- Should stakeholders also review the 50 sticker names and captions here? **Recommendation:** yes, as a list alongside the album mockup, so Epic 33's content is approved at the same time.
+- If everything can't fit at 320×568 even after rework, which secondary element should give way first (characters, larder, or the hint/megaphone row)? **Recommendation:** shrink the characters first; the larder and hint/megaphone are part of play.
 
 #### Depends On
 
-Epic 27 (the approved Home layout the mockups build on).
+Nothing. **First priority.**
 
 ---
 
-### Epic 29 — Parent Account and Multiple Child Profiles
+### Epic 29 — Fix Bee Line: Smaller, Well-Spaced Letters in a Bigger Play Area (P0)
+
+#### Objective
+
+Make Bee Line (the snake-style game) comfortably playable: smaller letters, clear space between every letter, and a play area that uses most of the screen, so a child can steer to the right letter without bumping into wrong ones.
+
+#### What's Wrong (Reported, Then Reproduced)
+
+- **Product owner:** the letters are so large that it's impossible to get past some of them to reach the correct one. You keep accidentally touching the wrong letter. The play area only uses a small part of the screen.
+- **Reproduced by PM at 375×667 with an 11-letter word ("ACHIEVEMENT", Age 9 list):**
+  - The letters are drawn at a fixed **64px**, whatever the screen size or word length (`TILE_SIZE = 64` in `BeeLineScreen.tsx`).
+  - The 11 tiles are packed with almost no space between them, some nearly touching.
+  - The play area fills only about the **bottom half** of the screen. The top half is Mama Bear, the prompt card, the score and the "?" box.
+  - The pickup radius is 0.75 of a tile (`HEAD_PICKUP_RADIUS_PX`), so with tiles this close, steering near one letter easily brushes another.
+
+#### User Stories
+
+- As a child, I want space between the letters, so I can steer my bee to the right one without crashing into the wrong ones.
+- As a child, I want a big play area, so there's room to move around.
+
+#### Acceptance Criteria
+
+- **Bigger play area:** during play, the letter field takes up **at least 60% of the screen height** at 375×667 and 320×568. The header area (Mama Bear, prompt, score, "?") gets more compact while playing; it isn't removed.
+- **Smaller letters that size themselves:** tile size is worked out from the play area's size and the number of letters (correct letters plus any decoys), instead of a fixed 64px. Target roughly 44–52px on a phone; never smaller than 40px, so letters stay readable for a 5-year-old. On a tablet, tiles can be bigger.
+- **Clear space between every letter:** no two tiles closer than **one full tile-width of empty space**, edge to edge. That's enough for the bee and its trail to pass between them. Applies to every word length in the built-in lists (up to the longest word, with decoys on Crazy!/Impossible!!) and to every randomised layout.
+- **If a long word doesn't fit,** tiles shrink (down to the 40px minimum) **before** the gap shrinks. If it still doesn't fit at the minimum, keep the gap and report it for product review (e.g. fewer decoys on small phones); don't let tiles crowd together.
+- **No accidental pickups:**
+  - A letter is collected only when the bee's head clearly reaches it (the head's centre over the tile), not when it brushes the edge.
+  - The bump zone around **wrong** letters is **smaller than the letter** (forgiving), so grazing past one doesn't count as a mistake.
+  - The bee's head stays **visible while dragging** and isn't hidden under the child's finger (e.g. the head leads slightly ahead of the finger).
+- **Every mode checked:** Easy (tap to collect: tap targets stay at least 44pt even when the letter looks smaller), Hard, Crazy!, and Impossible!! (snake steering, decoys, timer).
+- **Proven playable:** at 320×568 and 375×667, each correct letter in turn can be reached from the previous one without passing over a wrong letter, for the longest built-in word in every mode. Show this with an automated test over the layout logic, plus a real-device play check.
+- Existing Bee Line scoring, mistakes, decoys, timer and character reactions (Epics 20–24) behave as before.
+
+#### Tasks
+
+- Replace the fixed `TILE_SIZE` with a pure, unit-tested sizing function (play-area size + letter count → tile size and minimum gap).
+- Update the letter-placement logic (`bee-line.ts` / `snake-trail.ts`) to enforce the minimum edge-to-edge gap, with tests across word lengths and modes.
+- Tighten pickup to the head's centre; make wrong-letter bump zones smaller than the visible letter; scale the trail spacing with tile size.
+- Re-lay out `BeeLineScreen.tsx` so the field gets most of the height (compact header during play).
+- Add a head offset while dragging so the finger doesn't cover the bee.
+- Screenshot check at 320×568, 375×667 and tablet for each mode (the engineer's own verification; no stakeholder package needed).
+
+#### Open Questions
+
+- The exact numbers (60% height, one-tile gap, 40px minimum) are starting points. Tune them after a play test with a child.
+- Should Easy mode use the same spacing as the snake modes? **Recommendation:** yes. Keep it consistent; it also helps small fingers tap the right letter.
+
+#### Depends On
+
+Nothing. **Same top priority as Epic 28**; the two can be built in parallel.
+
+---
+
+### Epic 30 — Parent Account and Multiple Child Profiles
 
 #### Objective
 
@@ -1533,9 +1585,9 @@ Replace the single device profile with a **family**: one parent account (PIN-pro
 - **Editing or removing a child** happens only in the parent area. Removing a child asks for the PIN again, warns that the child's progress, streak, and stickers will be deleted, and can be cancelled.
 - **"Who's playing?" screen:** shown on launch when there are 2+ children, with large avatar + name tiles. One tap selects a child and goes to Home. With exactly one child it is skipped.
 - **Switching child from Home:** a small avatar chip in Home's top-left corner opens "Who's playing?". This replaces the "Not {name}? Switch profile" link.
-- **Parent gate:** Parent View, adding/editing/removing children, and purchases (Epic 35) all require the parent PIN. Word Lists stays open to children (it already has its own editor; it can be gated later if product wants).
+- **Parent gate:** Parent View, adding/editing/removing children, and purchases (Epic 36) all require the parent PIN. Word Lists stays open to children (it already has its own editor; it can be gated later if product wants).
 - **Forgotten PIN:** a "Forgot PIN?" flow lets an adult reset it after passing an adult challenge (e.g. a multi-step arithmetic question a young child can't answer). No child data is lost. Product accepts that this is a speed bump for children, not a security boundary.
-- **Upgrade from today's single profile:** an existing install's profile becomes the first child of a new family, with no lost progress (data side: Epic 30). The parent is asked to set a PIN the first time they open a parent-only area.
+- **Upgrade from today's single profile:** an existing install's profile becomes the first child of a new family, with no lost progress (data side: Epic 31). The parent is asked to set a PIN the first time they open a parent-only area.
 - Works fully offline (airplane mode).
 
 #### Tasks
@@ -1543,7 +1595,7 @@ Replace the single device profile with a **family**: one parent account (PIN-pro
 - Family data model: `ParentAccount` (PIN hash, settings) and `ChildProfile` (id, name, avatar, birthMonth, birthYear, createdAt), aligned with architecture Section 8's `ParentAccount`/`ChildProfile`. Never store the PIN in plain text.
 - A `family-store` replacing `profile-store`'s single profile: a children list and `activeChildId`.
 - Screens: parent setup, PIN entry/parent gate, add/edit child, "Who's playing?", plus the Home avatar chip.
-- A pure, unit-tested `getAge(birthMonth, birthYear, today)` helper (used by Epic 32).
+- A pure, unit-tested `getAge(birthMonth, birthYear, today)` helper (used by Epic 33).
 - Migration of the existing `profile` key into the family model.
 
 #### Open Questions
@@ -1554,11 +1606,11 @@ Replace the single device profile with a **family**: one parent account (PIN-pro
 
 #### Depends On
 
-Epic 28 (stakeholder-approved screens 1–5, which this epic connects to real data). This is the foundation for Epics 30–32 and 35.
+Epics 28 and 29 (both games playable first). This is the foundation for Epics 31–33 and 36.
 
 ---
 
-### Epic 30 — Per-Child Data (Progress, Streaks, Stickers, Settings)
+### Epic 31 — Per-Child Data (Progress, Streaks, Stickers, Settings)
 
 #### Objective
 
@@ -1570,12 +1622,12 @@ As a parent of two children, I want each child's words, streak, and stickers kep
 
 #### Acceptance Criteria
 
-- **Per child:** progress (sessions, word stats), daily streak and sticker album, selected word list, selected game, selected challenge mode, and Final Test results (new — results aren't saved anywhere today; see Epic 31).
+- **Per child:** progress (sessions, word stats), daily streak and sticker album, selected word list, selected game, selected challenge mode, and Final Test results (new — results aren't saved anywhere today; see Epic 32).
 - **Shared by the family:** custom word lists (any child can play any list) and parent settings.
-- Switching child (Epic 29) immediately shows that child's streak badge, stickers, selected list/game/mode, and progress. No restart is needed.
+- Switching child (Epic 30) immediately shows that child's streak badge, stickers, selected list/game/mode, and progress. No restart is needed.
 - Playing as child A never changes child B's data, verified by a test that plays as one child and checks the other is untouched.
 - **Migration:** an existing single-profile install keeps all its current progress, streak, and stickers, now attached to the first child. Migration runs once, is safe if the app is killed partway through, and never deletes the old keys until the new ones are written.
-- Removing a child (Epic 29) deletes only that child's data.
+- Removing a child (Epic 30) deletes only that child's data.
 
 #### Tasks
 
@@ -1590,11 +1642,11 @@ As a parent of two children, I want each child's words, streak, and stickers kep
 
 #### Depends On
 
-Epic 29.
+Epic 30.
 
 ---
 
-### Epic 31 — Parent Reports Per Child
+### Epic 32 — Parent Reports Per Child
 
 #### Objective
 
@@ -1633,11 +1685,11 @@ As a parent, I want to pick one of my children and see how they are doing, so I 
 
 #### Depends On
 
-Epics 29 and 30, and the approved reports mockup (Epic 28, screen 6).
+Epics 30 and 31.
 
 ---
 
-### Epic 32 — Age-Based Grace Days (Editable Config)
+### Epic 33 — Age-Based Grace Days (Editable Config)
 
 #### Objective
 
@@ -1681,15 +1733,15 @@ As a parent of a 5-year-old, I want my child's streak to survive a week away (ho
 
 #### Depends On
 
-Epic 29 (birth month/year on the child profile). The config file and the new rule can land first using `DEFAULT_GRACE_DAYS` for everyone.
+Epic 30 (birth month/year on the child profile). The config file and the new rule can land first using `DEFAULT_GRACE_DAYS` for everyone.
 
 ---
 
-### Epic 33 — Core Sticker Catalog (50 Stickers) and Collections Framework
+### Epic 34 — Core Sticker Catalog (50 Stickers) and Collections Framework
 
 #### Objective
 
-Grow the 7-sticker placeholder into a **50-sticker core collection** with real pacing (rarity mix, streak milestones), and restructure the catalog into **collections** so new sets (holidays in Epic 34, and future packs) can be added as data only.
+Grow the 7-sticker placeholder into a **50-sticker core collection** with real pacing (rarity mix, streak milestones), and restructure the catalog into **collections** so new sets (holidays in Epic 35, and future packs) can be added as data only.
 
 #### User Story
 
@@ -1702,7 +1754,7 @@ As a child, I want lots of different silly bees to collect, with special ones fo
 - **The 7 existing sticker ids are kept** within the 50, so stickers already earned are never lost. Sticker ids are never renamed or reused (saved albums reference them), and the file comment says so.
 - **Daily earning:** a child's first completed play each day earns one sticker: a random **not-yet-earned** core sticker, weighted 80% common / 20% rare (weights editable in data). Once all non-milestone core stickers are earned, the child gets duplicates (the "twin bees" ×2 badge).
 - **Milestone stickers** are earned on reaching streak lengths of **3, 7, 14, 30, 60, and 100 days** (thresholds editable in data), on top of that day's sticker. Once earned they're kept forever, even if the streak later lapses.
-- **Collections:** the catalog is organised into collections (`core` now; holiday collections in Epic 34). Adding a new collection or sticker means **adding data only** — no screen or store code changes. A test proves a new collection appears in the album without code changes.
+- **Collections:** the catalog is organised into collections (`core` now; holiday collections in Epic 35). Adding a new collection or sticker means **adding data only** — no screen or store code changes. A test proves a new collection appears in the album without code changes.
 - **Album UI** (Epic 26's screen) shows one section per collection with its own "N of M collected" count. Rarity order within a section stays as in the catalog. It's still usable at 320pt wide with 50+ slots (sections scroll; no lag).
 - **Day-one check** (UX Step 21): the empty-album first impression is reviewed with 50 silhouettes. A collapsed "more to discover" treatment is acceptable if the wall of gray feels discouraging.
 
@@ -1720,15 +1772,15 @@ As a child, I want lots of different silly bees to collect, with special ones fo
 
 #### Depends On
 
-The approved album design (Epic 28, screen 7). Best after Epic 30 so stickers are already per child, but it doesn't have to be.
+Nothing hard. Best after Epic 31 so stickers are already per child, but it doesn't have to be.
 
 ---
 
-### Epic 34 — Holiday Sticker Collections (20 Stickers, Easy to Extend)
+### Epic 35 — Holiday Sticker Collections (20 Stickers, Easy to Extend)
 
 #### Objective
 
-Add **20 holiday-themed stickers** that can be earned only during each holiday's window, using Epic 33's collections so future holidays are a data-only addition.
+Add **20 holiday-themed stickers** that can be earned only during each holiday's window, using Epic 34's collections so future holidays are a data-only addition.
 
 #### User Story
 
@@ -1767,11 +1819,11 @@ As a child, I want special stickers that only show up around holidays, so playin
 
 #### Depends On
 
-Epic 33.
+Epic 34.
 
 ---
 
-### Epic 35 — Parent Purchases and Unlocks (App Store / Google Play)
+### Epic 36 — Parent Purchases and Unlocks (App Store / Google Play)
 
 #### Objective
 
@@ -1805,11 +1857,11 @@ As a parent, I want to buy the full app from the parent area using my App Store 
 
 #### Depends On
 
-Epic 29 (parent account and gate), and the approved purchase screen layout (Epic 28, screen 8).
+Epic 30 (parent account and gate).
 
 ---
 
 ### Deferred / Not Broken Down Yet
 
-- **Cloud parent sign-in and family sync** (email login, the same family on several devices, data surviving a reinstall). Conflicts with the offline-first architecture and needs a backend plus child-privacy compliance work. A deliberate product/architecture decision, not a quiet add-on. Restore Purchases (Epic 35) already covers paid content surviving a reinstall; progress and stickers would not.
+- **Cloud parent sign-in and family sync** (email login, the same family on several devices, data surviving a reinstall). Conflicts with the offline-first architecture and needs a backend plus child-privacy compliance work. A deliberate product/architecture decision, not a quiet add-on. Restore Purchases (Epic 36) already covers paid content surviving a reinstall; progress and stickers would not.
 - **Other Phase 3 gaps from Section 2** still to be broken down: custom word-list import/upload, deeper mastery tracking ("words mastered"), and an expanded word-list library and themes.
