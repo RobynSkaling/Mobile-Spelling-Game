@@ -1341,6 +1341,389 @@ All tasks above are built and verified. What actually landed:
 
 #### Open Items Carried Forward
 
-- **Grace-day policy is still Epic 25's placeholder** (1 day, not replenished mid-streak). The UI now makes it visible, so product/UX should confirm it before launch.
+- **Grace-day policy is still Epic 25's placeholder** (1 day, not replenished mid-streak). The UI now makes it visible, so product/UX should confirm it before launch. **Update:** product has since decided on age-based grace (14 days for 5 and under, 7 for 6+) — see Epic 31.
 - **Whether to surface streak status in Parent View** (UX Step 22 confusion point) — not done; out of this epic's scope.
 - **Day-one discouragement check** (UX Step 21 confusion point): with the 7-sticker placeholder catalog, day one shows 1 earned + 6 silhouettes. Revisit when the real catalog size is decided.
+
+
+---
+
+## 13. Epics 27–34 — Phase 3: Families, Rewards Content, and Home Cleanup
+
+Phase 3's goal (Section 2) is to "make the app useful for real families and schools" and "improve retention across months, not just days." The biggest gap against that goal: the app supports **one child per device** today (`profile-store.ts` holds a single `profile`; progress, streaks, and stickers are stored per device). This section turns the product owner's Phase 3 direction into sequenced epics:
+
+- **Families:** a parent account that owns purchases, multiple children each with their own profile and data, and per-child parent reports (Epics 28–30, 34).
+- **Rewards content:** age-based grace days (Epic 31), a 50-sticker core catalog (Epic 32), and 20 holiday stickers in a collection model that can grow (Epic 33).
+- **Home cleanup:** a cleaner, minimalist Home screen, with the corner streak badge replaced by a named Sticker Album button under Play (Epic 27).
+
+Each epic carries **acceptance criteria** (what "done" means to product) as well as tasks, so engineering and QA share one definition of done.
+
+### Product Decisions Taken in This Breakdown (Confirm or Override)
+
+These shape several epics, so they are stated once here rather than buried:
+
+1. **The parent account is local to the device, not a cloud login.** The architecture requires the app to work fully offline with no backend (architecture Section 3). So "parent login" means a parent area on the device protected by a parent PIN, which owns the child profiles, settings, and purchases. A cloud account with email sign-in that syncs across devices would need a backend, a privacy policy, and child-data compliance work (COPPA in the US, GDPR-K in the EU/UK). That is a separate decision, listed under "Deferred" below and not broken down here.
+2. **Children don't have passwords.** For ages 5–9, "logging in" is a "Who's playing?" screen: tap your avatar. Children can't reach parent areas or purchases without the parent PIN.
+3. **The app never collects or stores card details.** "The parent has the payment information" is met by having all purchases go through the Apple App Store / Google Play, made from behind the parent gate. The store holds the payment method; the app only records what has been unlocked. Kids' apps must use store in-app purchase for digital content, and Apple's Kids Category requires a parental gate in front of purchases.
+4. **Age is stored as birth month + birth year, not a full date of birth.** That's enough to work out age (Epic 31) and keeps the child data we hold to a minimum.
+5. **"Grace period" means the longest gap a child can miss and keep their streak, and it resets each time they play.** Ages 5 and under: up to 14 missed days in a row. Ages 6+: up to 7. This **replaces** Epic 25's placeholder rule (one grace day per streak, never refilled). A 2-week allowance that could only be used once per streak would surprise parents. See Epic 31.
+
+### Sequencing
+
+| Order | Epic | Depends on | Notes |
+|---|---|---|---|
+| 1 | 27 — Home cleanup | — | Small, independent quick win; can ship now |
+| 2 | 28 — Parent account & child profiles | — | Foundation for 29–31 and 34 |
+| 3 | 29 — Per-child data | 28 | Engineering-heavy: every store becomes per-child, plus migration |
+| 4 | 30 — Per-child parent reports | 28, 29 | |
+| 5 | 31 — Age-based grace days | 28 (needs age) | The config file can land earlier, with the default value |
+| 6 | 32 — 50-sticker core catalog & collections | — | Content-heavy (50 names and captions); can run in parallel with 28–30 |
+| 7 | 33 — Holiday sticker collections | 32 | |
+| 8 | 34 — Parent purchases & unlocks | 28 | **Blocked on a product decision:** what is sold (see epic) |
+
+---
+
+### Epic 27 — Home Screen Minimalist Cleanup
+
+#### Objective
+
+Make Home calmer and more focused: one obvious primary action (Play), two clear secondary actions directly under it (Final Test and Sticker Album), and everything else tidy and consistent. Less text on screen for children who are still learning to read.
+
+#### User Stories
+
+- As a child aged 5–9, I want Home to show me just the big buttons I need, so I can start playing without wading through words I can't read yet.
+- As a child, I want a clearly named Sticker Album button right under Play, so I always know where my stickers are.
+
+#### Acceptance Criteria
+
+- The welcome message ("Welcome back, {name}! Mama Bear missed you." / "Mama Bear is ready to help you spell with a smile.") is **removed** entirely, in both its signed-in and signed-out variants.
+- **Directly under the Play button**, two secondary buttons sit side by side at equal size: **🎓 Final Test** (`gold`) and **Sticker Album**. Both are clearly smaller than Play and larger than the bottom-row buttons. Final Test is no longer in the bottom row.
+- **The corner streak badge is removed** (the gold "🐝 Start!" / "🐝 x5" pill in the top-right corner, Epic 26). It is replaced by the **Sticker Album** button under Play:
+  - The button is labelled **"Sticker Album"** — never "Start!".
+  - It still shows the streak at a glance: a small "🐝 x5" on the button while a streak is active, and the sleepy bee + "zzz" on a grace day (Epic 26's resting look, still never Tomato red). With no streak yet, or after a lapse, it shows only "Sticker Album" — no number, never "0".
+  - One tap opens the same Sticker Album modal as before (Epic 26), and the album's "Back to Play" and ✕ behave as before.
+  - Its screen-reader label says "Sticker Album", plus the streak when there is one (e.g. "Sticker Album. 5-Day Streak.").
+- The bottom row is three **equal-size square buttons** in this order: **Word Lists · Instructions · Parent View**. Instructions becomes a square 📖 button; the separate "📖 Instructions" pill near the top is removed.
+- No other information is lost: game picker, challenge picker, and the "Playing: {list}" label stay.
+- Everything is still reachable on the smallest supported phone (320×568). **Play, Final Test and Sticker Album are visible without scrolling at 375×667.** Engineering reports the measured scroll height before and after (Home measured 847px at 320×568 in Epic 26).
+- Every button keeps a touch target of at least 44pt and a screen-reader label.
+
+#### Tasks
+
+- Update `HomeScreen.tsx`: remove the message `Text`; remove the top Instructions pill; remove the corner `StreakBadge`; add the Final Test + Sticker Album pair below Play; rebuild the actions row as three squares.
+- Turn `StreakBadge.tsx` into the Sticker Album button (or replace it), keeping Epic 26's pure, tested streak logic (`getStreakStatus`, `streak-display.ts`). Update `getBadgeLabel`/`getBadgeAccessibilityLabel` and their tests for the new "Sticker Album" wording; the never-show-0 test stays.
+- Consistency pass on Home spacing (one spacing scale from `theme.spacing`, no one-off margins).
+- Screenshot Home at 320×568 and 375×667, before and after, and attach them to the PR.
+
+#### Open Questions
+
+- Should "Not {name}? Switch profile" stay until Epic 28 replaces it with the child avatar chip? **Recommendation:** yes. Epic 28 removes it.
+- Any further minimalism (e.g. dropping the title text under Mama Bear)? Not in scope unless product asks.
+- **Final Test and Sticker Album side by side, or stacked?** Both were asked for "under Play". Side by side keeps both right under Play and saves height on small phones; stacked (Play → Final Test → Sticker Album) makes each button wider. **Recommendation:** side by side. Product to confirm.
+- **This changes UX Step 20** (a small corner badge, deliberately kept apart from Play). Product has chosen a named button under Play instead, to make the album easier to find. UX should check that the streak count on the button stays glanceable and doesn't compete with Play.
+
+#### Depends On
+
+Nothing. Can ship before the family work.
+
+---
+
+### Epic 28 — Parent Account and Multiple Child Profiles
+
+#### Objective
+
+Replace the single device profile with a **family**: one parent account (PIN-protected, owns settings and purchases) and up to 6 child profiles, each chosen from a "Who's playing?" screen.
+
+#### User Stories
+
+- As a parent, I want to set up a parent account protected by a PIN, so my children can't change settings or buy things.
+- As a parent with more than one child, I want to add a profile for each child, so each one has their own progress, streak, and stickers.
+- As a child, I want to tap my own picture to start playing, without typing a password.
+
+#### Acceptance Criteria
+
+- **First launch:** the parent creates a parent account by setting a 4-digit parent PIN (entered twice), then adds the first child.
+- **Adding a child** (parent area only) asks for name, avatar, **birth month and birth year**. Up to 6 children (an editable constant).
+- **Editing or removing a child** happens only in the parent area. Removing a child asks for the PIN again, warns that the child's progress, streak, and stickers will be deleted, and can be cancelled.
+- **"Who's playing?" screen:** shown on launch when there are 2+ children, with large avatar + name tiles. One tap selects a child and goes to Home. With exactly one child it is skipped.
+- **Switching child from Home:** a small avatar chip in Home's top-left corner opens "Who's playing?". This replaces the "Not {name}? Switch profile" link.
+- **Parent gate:** Parent View, adding/editing/removing children, and purchases (Epic 34) all require the parent PIN. Word Lists stays open to children (it already has its own editor; it can be gated later if product wants).
+- **Forgotten PIN:** a "Forgot PIN?" flow lets an adult reset it after passing an adult challenge (e.g. a multi-step arithmetic question a young child can't answer). No child data is lost. Product accepts that this is a speed bump for children, not a security boundary.
+- **Upgrade from today's single profile:** an existing install's profile becomes the first child of a new family, with no lost progress (data side: Epic 29). The parent is asked to set a PIN the first time they open a parent-only area.
+- Works fully offline (airplane mode).
+
+#### Tasks
+
+- Family data model: `ParentAccount` (PIN hash, settings) and `ChildProfile` (id, name, avatar, birthMonth, birthYear, createdAt), aligned with architecture Section 8's `ParentAccount`/`ChildProfile`. Never store the PIN in plain text.
+- A `family-store` replacing `profile-store`'s single profile: a children list and `activeChildId`.
+- Screens: parent setup, PIN entry/parent gate, add/edit child, "Who's playing?", plus the Home avatar chip.
+- A pure, unit-tested `getAge(birthMonth, birthYear, today)` helper (used by Epic 31).
+- Migration of the existing `profile` key into the family model.
+
+#### Open Questions
+
+- Optional per-child picture PIN, to stop siblings playing as each other? **Recommendation:** not now. Revisit if parents ask.
+- Maximum children: 6 proposed.
+- Architecture should confirm the PIN hashing approach and whether `expo-secure-store` is used for the PIN.
+
+#### Depends On
+
+Nothing. This is the foundation for Epics 29–31 and 34.
+
+---
+
+### Epic 29 — Per-Child Data (Progress, Streaks, Stickers, Settings)
+
+#### Objective
+
+Give each child their own progress, streak, sticker album, and game settings, so siblings never mix results. This is the "per-child" step architecture 27.2 prepared for with the `dailyRewardsKey(profileId?)` seam.
+
+#### User Story
+
+As a parent of two children, I want each child's words, streak, and stickers kept separate, so one child's practice never shows up as the other's.
+
+#### Acceptance Criteria
+
+- **Per child:** progress (sessions, word stats), daily streak and sticker album, selected word list, selected game, selected challenge mode, and Final Test results (new — results aren't saved anywhere today; see Epic 30).
+- **Shared by the family:** custom word lists (any child can play any list) and parent settings.
+- Switching child (Epic 28) immediately shows that child's streak badge, stickers, selected list/game/mode, and progress. No restart is needed.
+- Playing as child A never changes child B's data, verified by a test that plays as one child and checks the other is untouched.
+- **Migration:** an existing single-profile install keeps all its current progress, streak, and stickers, now attached to the first child. Migration runs once, is safe if the app is killed partway through, and never deletes the old keys until the new ones are written.
+- Removing a child (Epic 28) deletes only that child's data.
+
+#### Tasks
+
+- Scope every per-child store key by child id: `progress-store`, `daily-rewards-store` (pass the active child id into the existing `dailyRewardsKey`), `game-mode-store`, `game-selection-store`, and the selected-list part of `word-list-store`.
+- Reload the per-child stores when `activeChildId` changes.
+- Add per-child Final Test result storage (date, list, words, pass/fail, score).
+- A one-time, versioned migration from the per-device keys to the first child's keys, with tests.
+
+#### Open Questions
+
+- Should each child have their own private custom word lists as well as the shared ones? **Recommendation:** shared only, for now.
+
+#### Depends On
+
+Epic 28.
+
+---
+
+### Epic 30 — Parent Reports Per Child
+
+#### Objective
+
+Let the parent see one child's details and reports at a time, switching between children in the parent area.
+
+#### User Story
+
+As a parent, I want to pick one of my children and see how they are doing, so I know who needs help with which words, without their results being mixed together.
+
+#### Acceptance Criteria
+
+- Parent View (behind the parent gate) has a **child switcher** at the top: avatar + name chips, one child selected at a time. It opens on the child who is currently playing, and remembers the last child viewed.
+- Switching children updates every section to that child only. No combined family totals in this epic.
+- **Report sections for the selected child:**
+  - **Summary:** sessions this week, total words completed, accuracy (correct vs. missed).
+  - **Tricky words:** words missed most, with the existing "make a Tricky Words list" action (the new list is created for the family and selected for this child).
+  - **Recent sessions:** date/time, game, words completed.
+  - **Streak:** current streak, longest streak, and whether it's resting (same non-punishing wording as the child-facing UI; never a "0").
+  - **Stickers:** collected count per collection (e.g. "Core 12 / 50 · Holiday 2 / 20").
+  - **Final Test history:** date, list, result.
+  - **Most-played game:** Honey Pot Flick vs. Bee Line.
+- A clear empty state for a child with no play yet ("Nothing yet — {name} hasn't played a round").
+- "Clear word stats" affects only the selected child, and its confirmation names the child.
+- Readable on a 320pt-wide phone; long word lists scroll inside their own section.
+
+#### Tasks
+
+- Restructure `ParentScreen.tsx` around a selected child id, with a child-switcher component.
+- Pure, unit-tested report helpers (sessions per week, accuracy, most-played game) in a `parent/logic` module.
+- Record which game each session was played in (sessions don't store this today).
+
+#### Open Questions
+
+- "Time spent practising" (spec Section 10) needs session end times, which aren't recorded. **Recommendation:** a later epic.
+- A family overview comparing children side by side? **Recommendation:** no. Comparing siblings can feel unfair to children; one child at a time is the brief.
+
+#### Depends On
+
+Epics 28 and 29.
+
+---
+
+### Epic 31 — Age-Based Grace Days (Editable Config)
+
+#### Objective
+
+Make missed-day forgiveness depend on the child's age: **5 and under get 2 weeks (14 days), 6 and over get 1 week (7 days)**. The rule lives in one small config file, so changing it later is a one-line edit.
+
+#### User Story
+
+As a parent of a 5-year-old, I want my child's streak to survive a week away (holidays, illness), so they come back to a "sleeping bee", not a broken streak.
+
+#### Acceptance Criteria
+
+- **One config file** (proposed: `src/data/rewards/streak-tuning.ts`) holds the rule as data. For example:
+
+  ```ts
+  export const GRACE_DAYS_BY_AGE = [
+    { maxAge: 5, graceDays: 14 },        // 5 and under: 2 weeks
+    { maxAge: Infinity, graceDays: 7 },  // 6 and over: 1 week
+  ];
+  export const DEFAULT_GRACE_DAYS = 14;  // used when a child's age is unknown
+  ```
+
+  Changing a number, or adding a new age band, needs **no other code changes**, and the file comment explains how to edit it.
+- **Rule:** a child can miss up to their grace-day count **in a row** and keep their streak. Missing one more day than that lapses it. Each time the child plays, the allowance **resets** (this replaces Epic 25's one-grace-day-per-streak placeholder).
+  - Age 5: last played Monday, misses 14 days, plays on day 15 → streak continues. Misses 15 days → fresh streak ("Let's start a fresh streak together!").
+  - Age 7: same, with 7.
+- **Birthdays mid-gap:** the allowance is based on the child's age **on the day they last played**. Turning 6 during a break never shortens the break they're already on.
+- **Unknown age** (e.g. a migrated profile with no birth month/year yet) uses `DEFAULT_GRACE_DAYS`. The parent is prompted to add the age in the parent area.
+- The Home badge and album show "resting" for the whole grace window, and it lapses only after it (Epic 26's display logic stays consistent with the recording logic).
+- Unit tests read the expected numbers **from the config**, so editing the config doesn't break tests that don't depend on the specific numbers; a separate test pins today's 14/7 values deliberately.
+
+#### Tasks
+
+- Add `streak-tuning.ts` and a pure `graceDaysForAge(age)` lookup.
+- Update `applyCompletedSession` and `getStreakStatus` to use "maximum gap" grace (computed from age at `lastPlayedDay`) instead of the spent-down `graceRemaining` pool. Store the computed allowance (or the age) with the streak so status can be worked out without the profile. Bump `schemaVersion` and migrate.
+- Update the Epic 25/26 tests to the new rule, plus the age-band, birthday, and unknown-age cases.
+
+#### Open Questions
+
+- Should the "resting" copy change for a long nap (e.g. after 7+ days: "Bee's been napping a while — come wake it up!")? A UX call; optional.
+- Should the parent be able to override grace per child in settings? **Recommendation:** not now. The config file is the single source.
+
+#### Depends On
+
+Epic 28 (birth month/year on the child profile). The config file and the new rule can land first using `DEFAULT_GRACE_DAYS` for everyone.
+
+---
+
+### Epic 32 — Core Sticker Catalog (50 Stickers) and Collections Framework
+
+#### Objective
+
+Grow the 7-sticker placeholder into a **50-sticker core collection** with real pacing (rarity mix, streak milestones), and restructure the catalog into **collections** so new sets (holidays in Epic 33, and future packs) can be added as data only.
+
+#### User Story
+
+As a child, I want lots of different silly bees to collect, with special ones for long streaks, so there's always a new sticker to look forward to.
+
+#### Acceptance Criteria
+
+- **50 core stickers**: 30 common, 14 rare, 6 milestone (proposed mix; editable in data).
+- **Each sticker has:** a stable id, name, caption, rarity, collection, and placeholder emoji (until artwork exists). Content is age-appropriate (5–9), with no real people, brands, or scary content, and captions a parent can read aloud in one breath.
+- **The 7 existing sticker ids are kept** within the 50, so stickers already earned are never lost. Sticker ids are never renamed or reused (saved albums reference them), and the file comment says so.
+- **Daily earning:** a child's first completed play each day earns one sticker: a random **not-yet-earned** core sticker, weighted 80% common / 20% rare (weights editable in data). Once all non-milestone core stickers are earned, the child gets duplicates (the "twin bees" ×2 badge).
+- **Milestone stickers** are earned on reaching streak lengths of **3, 7, 14, 30, 60, and 100 days** (thresholds editable in data), on top of that day's sticker. Once earned they're kept forever, even if the streak later lapses.
+- **Collections:** the catalog is organised into collections (`core` now; holiday collections in Epic 33). Adding a new collection or sticker means **adding data only** — no screen or store code changes. A test proves a new collection appears in the album without code changes.
+- **Album UI** (Epic 26's screen) shows one section per collection with its own "N of M collected" count. Rarity order within a section stays as in the catalog. It's still usable at 320pt wide with 50+ slots (sections scroll; no lag).
+- **Day-one check** (UX Step 21): the empty-album first impression is reviewed with 50 silhouettes. A collapsed "more to discover" treatment is acceptable if the wall of gray feels discouraging.
+
+#### Tasks
+
+- Restructure `sticker-catalog.ts` into collections plus a sticker list. Write the 50 names, captions, and emojis (content task, with product review of the list before it's merged).
+- Replace the store's placeholder `awardSticker` with a pure, unit-tested `pickDailySticker(catalog, album, random)` and `milestonesReached(streak, album)`, with an injectable random source so tests are repeatable.
+- Update the album screen to group by collection.
+- Migrate the album `schemaVersion` if the stored shape changes.
+
+#### Open Questions
+
+- Should a duplicate show the ×N badge or just be skipped quietly? Epic 26 shows ×N. Keep it unless UX objects.
+- Real sticker artwork: an art-pipeline follow-up, like the character asset system (Epics 7/9).
+
+#### Depends On
+
+Nothing hard. Best after Epic 29 so stickers are already per child, but it doesn't have to be.
+
+---
+
+### Epic 33 — Holiday Sticker Collections (20 Stickers, Easy to Extend)
+
+#### Objective
+
+Add **20 holiday-themed stickers** that can be earned only during each holiday's window, using Epic 32's collections so future holidays are a data-only addition.
+
+#### User Story
+
+As a child, I want special stickers that only show up around holidays, so playing on Halloween or Valentine's Day feels extra exciting.
+
+#### Acceptance Criteria
+
+- **5 holiday collections × 4 stickers = 20** (proposed set, regional review below):
+
+  | Collection | Earn window (local date, inclusive) |
+  |---|---|
+  | New Year | 31 Dec – 7 Jan (crosses the year boundary) |
+  | Valentine's | 7 – 14 Feb |
+  | Spring (Easter-time) | 20 Mar – 30 Apr |
+  | Halloween | 17 – 31 Oct |
+  | Winter Holidays | 1 – 30 Dec |
+
+  "Spring" has a fixed window, so the app doesn't need to calculate Easter's moving date.
+- **Earning:** during a holiday window, the day's sticker comes from that holiday's unearned stickers first. Once all 4 are earned, it falls back to the core collection. Milestones still apply.
+- **Outside the window:** that holiday's section shows its silhouettes with a friendly "Comes back in October!" note. Holiday stickers already earned are kept forever.
+- **A window that crosses the year** (New Year) works correctly, and a unit test covers 31 Dec and 1 Jan.
+- **Adding a new holiday** (e.g. a birthday sticker or a regional festival) means adding one collection entry with its window and stickers. No code changes, and a test proves it.
+- Windows use the device's local date (the same `localDayKey` as streaks), so a child playing at 9pm on 31 Oct still gets Halloween.
+
+#### Tasks
+
+- Add an optional `window: { start: 'MM-DD', end: 'MM-DD' }` to the collection data, plus a pure, unit-tested `activeCollections(today)`.
+- Write the 20 holiday names, captions, and emojis.
+- Extend `pickDailySticker` to prefer active holiday collections.
+- Album: holiday sections and the "comes back in…" note.
+
+#### Open Questions
+
+- **Regional and cultural fit:** the proposed holidays fit the UK/US/Canada/Australia. Product should confirm the target markets, and whether to add e.g. Diwali or Lunar New Year (data-only once this epic exists).
+- Should a child who missed a holiday be able to earn its stickers later? **Recommendation:** no. Waiting for next year is part of the charm.
+
+#### Depends On
+
+Epic 32.
+
+---
+
+### Epic 34 — Parent Purchases and Unlocks (App Store / Google Play)
+
+#### Objective
+
+Let the parent buy the app's paid content safely, from behind the parent gate, using the app stores' in-app purchase. The purchase belongs to the family (the parent account), not to one child.
+
+#### User Story
+
+As a parent, I want to buy the full app from the parent area using my App Store / Google Play account, so my children get access without ever seeing a payment screen or my card details.
+
+#### Acceptance Criteria
+
+- Purchases are offered **only inside the parent area** (behind the PIN). No purchase prompt or upsell is ever shown on a child-facing screen.
+- Payment uses the store's own purchase sheet. **The app never asks for, sees, or stores card details**; the store account holds the payment method.
+- An unlock applies to the **whole family** (every child profile on the device).
+- **Restore Purchases** works on a reinstall or new device signed into the same store account.
+- Unlocks are saved on the device, so **paid content keeps working offline**. No purchase check ever blocks play.
+- Cancelled, failed, pending ("Ask to Buy"), and refunded purchases are handled with clear messages for the parent.
+- Meets App Store Kids Category and Google Play Families rules (parental gate before purchase; no ads).
+
+#### Tasks
+
+- A purchases module (e.g. `expo-iap` or RevenueCat). This needs an Expo **development build**, since in-app purchase doesn't run in Expo Go.
+- An unlocks store with an offline cache, plus restore.
+- A purchase / restore screen in the parent area.
+- Store-console setup (products, pricing, tax and agreements) — an owner task outside the codebase.
+
+#### Open Questions (blocking)
+
+- **What is sold?** Spec Section 10 lists: a one-time full-app purchase, word-list expansion packs, or a family subscription. **Product must pick the launch model before this epic starts.** Recommendation for Phase 3: a one-time "full app" unlock, with packs or a subscription in Phase 4.
+- Which content is free vs. paid (e.g. Bee Line, holiday collections, extra word lists)?
+
+#### Depends On
+
+Epic 28 (parent account and gate).
+
+---
+
+### Deferred / Not Broken Down Yet
+
+- **Cloud parent sign-in and family sync** (email login, the same family on several devices, data surviving a reinstall). Conflicts with the offline-first architecture and needs a backend plus child-privacy compliance work. A deliberate product/architecture decision, not a quiet add-on. Restore Purchases (Epic 34) already covers paid content surviving a reinstall; progress and stickers would not.
+- **Other Phase 3 gaps from Section 2** still to be broken down: custom word-list import/upload, deeper mastery tracking ("words mastered"), and an expanded word-list library and themes.
