@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, Easing, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
@@ -40,6 +41,7 @@ import {
   randomPotPosition,
   toContainerRelative,
 } from '@/features/play/logic/honey-pot-flick';
+import { FLICK_TILE_GAP, getBannerFontSize, getFlickLayout } from '@/features/play/logic/honey-pot-layout';
 
 const GHOST_HALF = 28;
 const THROW_DURATION_MS = 260;
@@ -61,6 +63,9 @@ const STEAL_LUNGE_ANIM_MS = 260;
 
 export function PlayScreen() {
   const [availableLetters, setAvailableLetters] = useState<string[]>([]);
+  // Tray sizing follows the round's full bundle, not what's left in it, so the field above the tray
+  // doesn't resize every time a letter is caught.
+  const [roundLetterCount, setRoundLetterCount] = useState(0);
   const [guess, setGuess] = useState('');
   const [feedback, setFeedback] = useState('Flick a letter at the honey pot!');
   const [celebrating, setCelebrating] = useState(false);
@@ -424,7 +429,9 @@ export function PlayScreen() {
       return;
     }
 
-    setAvailableLetters(buildLetterBundle(currentWord, modeConfig.decoyLetterCount));
+    const bundle = buildLetterBundle(currentWord, modeConfig.decoyLetterCount);
+    setAvailableLetters(bundle);
+    setRoundLetterCount(bundle.length);
     setGuess('');
     setActiveLetter(null);
     setActiveIndex(null);
@@ -444,6 +451,16 @@ export function PlayScreen() {
       placePotAt(randomPotPosition(fieldBounds));
     }
   }, [fieldBounds, potCenter]);
+
+  // The field's height depends on the round's tray, so a new word can resize it after the pot was
+  // placed; re-place the pot whenever the field's size changes so it never sits outside it.
+  const fieldSize = fieldBounds ? `${Math.round(fieldBounds.width)}x${Math.round(fieldBounds.height)}` : null;
+  useEffect(() => {
+    if (fieldBounds && potCenterRef.current) {
+      placePotAt(randomPotPosition(fieldBounds));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldSize]);
 
   const measureField = () => {
     if (!containerBounds) {
@@ -687,35 +704,105 @@ export function PlayScreen() {
     router.replace('/home');
   };
 
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const currentWordLength = currentWord?.length ?? 0;
+  const layout = getFlickLayout({
+    screenWidth,
+    screenHeight,
+    horizontalPadding: theme.spacing.md,
+    letterCount: roundLetterCount || currentWordLength,
+    wordLength: currentWordLength,
+  });
+  const showControls = !showBanner && !celebrating;
+
   return (
     <View
       ref={containerRef}
-      style={styles.container}
+      style={[
+        styles.container,
+        { paddingTop: insets.top + theme.spacing.xs, paddingBottom: insets.bottom + theme.spacing.xs },
+      ]}
       onLayout={() => {
         containerRef.current?.measureInWindow((x, y, width, height) => {
           setContainerBounds({ x, y, width, height });
         });
       }}
     >
-      <Pressable testID="back-button" style={styles.backButton} onPress={handleGoHome}>
-        <Text style={styles.backButtonText}>← Back</Text>
-      </Pressable>
+      <View style={styles.topBar}>
+        <Pressable
+          testID="back-button"
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          style={styles.topBarButton}
+          onPress={handleGoHome}
+        >
+          <Text style={styles.topBarButtonText}>← Back</Text>
+        </Pressable>
+        <Pressable
+          testID="reset-button"
+          accessibilityRole="button"
+          accessibilityLabel="Reset game"
+          style={styles.topBarButton}
+          onPress={handleReset}
+        >
+          <Text style={styles.topBarButtonText}>↻ Reset</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Word Lists"
+          style={styles.topBarButton}
+          onPress={() => router.replace('/lists')}
+        >
+          <Text style={styles.topBarButtonText}>📚</Text>
+        </Pressable>
+        {!layout.compact ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Exit" style={styles.exitButton} onPress={handleExitApp}>
+            <Text style={styles.exitButtonText}>Exit</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
-      <Text style={styles.title}>Honey Pot Flick</Text>
-      <Text style={styles.greeting}>
-        {profile ? `Hi ${profile.name}! Mama Bear is cheering for you.` : 'Mama Bear is cheering for you.'}
+      <Text testID="info-line" style={styles.infoLine} numberOfLines={1}>
+        Honey Pot Flick · {modeConfig.label}
+        {selectedList ? ` · ${selectedList.name}` : ''}
       </Text>
-      {selectedList ? <Text style={styles.listName}>List: {selectedList.name}</Text> : null}
-      <Text style={styles.modeLine}>Mode: {modeConfig.label}</Text>
-      <Text style={styles.score}>Score {score}</Text>
 
       {words.length > 0 ? (
-        <View style={styles.characterRow}>
+        <View style={styles.headerRow}>
           <GestureDetector gesture={mamaBearTap}>
             <View>
-              <Character characterId="mama-bear" size="medium" animationState={mamaBear.animationState} />
+              <Character characterId="mama-bear" size={layout.characterSize} animationState={mamaBear.animationState} />
             </View>
           </GestureDetector>
+
+          <View style={styles.headerCenter}>
+            <Text style={styles.score}>Score {score}</Text>
+            <View testID="honey-larder" style={styles.honeyLarderRow}>
+              <Text style={styles.honeyLarderLabel}>Honey saved</Text>
+              <Animated.View
+                style={[
+                  styles.honeyLarderPots,
+                  stealAttempt.status === 'Telegraphing' && styles.honeyLarderPotsInJeopardy,
+                  {
+                    transform: [
+                      { scale: villainLungeAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) },
+                    ],
+                  },
+                ]}
+              >
+                {Array.from({ length: Math.min(honeyStash, HONEY_LARDER_DISPLAY_CAP) }).map((_, index) => (
+                  <Text key={index} style={styles.honeyLarderPotEmoji}>
+                    🍯
+                  </Text>
+                ))}
+                {honeyStash > HONEY_LARDER_DISPLAY_CAP ? (
+                  <Text style={styles.honeyLarderOverflow}>+{honeyStash - HONEY_LARDER_DISPLAY_CAP}</Text>
+                ) : null}
+              </Animated.View>
+            </View>
+          </View>
+
           {villainId ? (
             <GestureDetector gesture={villainTap}>
               <Animated.View
@@ -726,36 +813,12 @@ export function PlayScreen() {
                   ],
                 }}
               >
-                <Character characterId={villainId} size="small" animationState={villain.animationState} />
+                <Character characterId={villainId} size={layout.characterSize} animationState={villain.animationState} />
               </Animated.View>
             </GestureDetector>
-          ) : null}
-        </View>
-      ) : null}
-
-      {words.length > 0 ? (
-        <View testID="honey-larder" style={styles.honeyLarderRow}>
-          <Text style={styles.honeyLarderLabel}>Honey saved</Text>
-          <Animated.View
-            style={[
-              styles.honeyLarderPots,
-              stealAttempt.status === 'Telegraphing' && styles.honeyLarderPotsInJeopardy,
-              {
-                transform: [
-                  { scale: villainLungeAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) },
-                ],
-              },
-            ]}
-          >
-            {Array.from({ length: Math.min(honeyStash, HONEY_LARDER_DISPLAY_CAP) }).map((_, index) => (
-              <Text key={index} style={styles.honeyLarderPotEmoji}>
-                🍯
-              </Text>
-            ))}
-            {honeyStash > HONEY_LARDER_DISPLAY_CAP ? (
-              <Text style={styles.honeyLarderOverflow}>+{honeyStash - HONEY_LARDER_DISPLAY_CAP}</Text>
-            ) : null}
-          </Animated.View>
+          ) : (
+            <View style={{ width: layout.characterSize }} />
+          )}
         </View>
       ) : null}
 
@@ -768,26 +831,32 @@ export function PlayScreen() {
         </View>
       ) : (
         <>
-          <View style={styles.targetCard}>
-            <Text style={styles.targetLabel}>Listen and spell it!</Text>
-            <Text style={styles.targetPrompt}>🎯 🍯 🐝</Text>
+          <View testID="prompt-card" style={styles.targetCard}>
+            <View style={styles.targetHeader}>
+              <Text style={styles.targetLabel}>Listen and spell it!</Text>
+              <Text style={styles.targetPrompt}>🎯 🍯 🐝</Text>
+            </View>
+
+            <View style={styles.answerRow}>
+              {guess.split('').map((letter, index) => (
+                <View
+                  key={`${letter}-${index}`}
+                  style={[styles.answerTile, { width: layout.answerTileSize, height: layout.answerTileSize }]}
+                >
+                  <Text style={[styles.answerTileText, { fontSize: Math.round(layout.answerTileSize * 0.45) }]}>
+                    {letter.toUpperCase()}
+                  </Text>
+                </View>
+              ))}
+              {guess.length < currentWordLength && (
+                <View style={[styles.answerSlot, { width: layout.answerTileSize, height: layout.answerTileSize }]}>
+                  <Text style={[styles.answerSlotText, { fontSize: Math.round(layout.answerTileSize * 0.45) }]}>?</Text>
+                </View>
+              )}
+            </View>
           </View>
 
-          <View style={styles.answerRow}>
-            {guess.split('').map((letter, index) => (
-              <View key={`${letter}-${index}`} style={styles.answerTile}>
-                <Text style={styles.answerTileText}>{letter.toUpperCase()}</Text>
-              </View>
-            ))}
-            {guess.length < (currentWord?.length ?? 0) && (
-              <View style={styles.answerSlot}>
-                <Text style={styles.answerSlotText}>?</Text>
-              </View>
-            )}
-          </View>
-
-          <Text style={styles.fieldLabel}>Flick a letter into the honey pot</Text>
-          <View ref={fieldRef} style={styles.field} onLayout={measureField}>
+          <View ref={fieldRef} testID="flick-field" style={styles.field} onLayout={measureField}>
             {potVisible && potCenter && fieldBounds ? (
               <Animated.View
                 testID="honey-pot"
@@ -806,7 +875,7 @@ export function PlayScreen() {
             ) : null}
           </View>
 
-          <View style={styles.tileGrid}>
+          <View testID="letter-tray" style={styles.tileGrid}>
             {availableLetters.map((letter, index) => {
               const pan = Gesture.Pan()
                 .runOnJS(true)
@@ -820,8 +889,21 @@ export function PlayScreen() {
               // native gesture recognizer isn't torn down mid-gesture. It's just hidden visually.
               return (
                 <GestureDetector key={`${letter}-${index}`} gesture={pan}>
-                  <View style={[styles.tileButton, activeIndex === index && styles.tileButtonHidden]}>
-                    <Text style={styles.tileButtonText}>{letter.toUpperCase()}</Text>
+                  <View
+                    testID="letter-tile"
+                    style={[
+                      styles.tileButton,
+                      {
+                        width: layout.tray.tileSize,
+                        height: layout.tray.tileSize,
+                        borderRadius: Math.round(layout.tray.tileSize * 0.3),
+                      },
+                      activeIndex === index && styles.tileButtonHidden,
+                    ]}
+                  >
+                    <Text style={[styles.tileButtonText, { fontSize: Math.round(layout.tray.tileSize * 0.4) }]}>
+                      {letter.toUpperCase()}
+                    </Text>
                   </View>
                 </GestureDetector>
               );
@@ -845,30 +927,43 @@ export function PlayScreen() {
             </Animated.View>
           ) : null}
 
-          <Text
-            testID="flick-feedback"
-            style={[
-              styles.feedback,
-              feedback.includes('Oops') || feedback.includes('Off target') || feedback.includes('harder')
-                ? styles.feedbackError
-                : styles.feedbackSuccess,
-            ]}
-          >
-            {feedback}
-          </Text>
+          <View style={styles.bottomBar}>
+            <Text
+              testID="flick-feedback"
+              numberOfLines={2}
+              style={[
+                styles.feedback,
+                feedback.includes('Oops') || feedback.includes('Off target') || feedback.includes('harder')
+                  ? styles.feedbackError
+                  : styles.feedbackSuccess,
+              ]}
+            >
+              {feedback}
+            </Text>
 
-          {!showBanner && !celebrating ? (
-            <View style={styles.cornerButtons}>
-              {modeConfig.hintAllowed ? (
-                <Pressable testID="hint-button" style={styles.cornerButton} onPress={handleHintPress}>
-                  <Text style={styles.cornerButtonEmoji}>💡</Text>
-                </Pressable>
-              ) : null}
-              <Pressable testID="megaphone-button" style={styles.cornerButton} onPress={handleMegaphonePress}>
-                <Text style={styles.cornerButtonEmoji}>📣</Text>
+            {modeConfig.hintAllowed ? (
+              <Pressable
+                testID="hint-button"
+                accessibilityRole="button"
+                accessibilityLabel="Show the word again"
+                disabled={!showControls}
+                style={[styles.cornerButton, !showControls && styles.controlHidden]}
+                onPress={handleHintPress}
+              >
+                <Text style={styles.cornerButtonEmoji}>💡</Text>
               </Pressable>
-            </View>
-          ) : null}
+            ) : null}
+            <Pressable
+              testID="megaphone-button"
+              accessibilityRole="button"
+              accessibilityLabel="Say the word"
+              disabled={!showControls}
+              style={[styles.cornerButton, !showControls && styles.controlHidden]}
+              onPress={handleMegaphonePress}
+            >
+              <Text style={styles.cornerButtonEmoji}>📣</Text>
+            </Pressable>
+          </View>
         </>
       )}
 
@@ -898,23 +993,15 @@ export function PlayScreen() {
             ]}
           >
             <Text style={styles.bannerFlourish}>🎉 ✨ 🍯 ✨ 🎉</Text>
-            <Text testID="target-word" style={styles.bannerWord}>{currentWord.toUpperCase()}</Text>
+            <Text
+              testID="target-word"
+              style={[styles.bannerWord, { fontSize: getBannerFontSize(screenWidth, currentWordLength) }]}
+            >{currentWord.toUpperCase()}</Text>
             <Text style={styles.bannerSubtext}>Listen closely and remember it!</Text>
           </Animated.View>
         </View>
       ) : null}
 
-      <View style={styles.actionsRow}>
-        <Pressable style={styles.secondaryButton} onPress={handleReset}>
-          <Text style={styles.secondaryButtonText}>Reset game</Text>
-        </Pressable>
-        <Pressable style={styles.secondaryButton} onPress={() => router.replace('/lists')}>
-          <Text style={styles.secondaryButtonText}>📚 Word Lists</Text>
-        </Pressable>
-        <Pressable style={styles.exitButton} onPress={handleExitApp}>
-          <Text style={styles.exitButtonText}>Exit</Text>
-        </Pressable>
-      </View>
     </View>
   );
 }
@@ -922,59 +1009,62 @@ export function PlayScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    padding: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.md,
     backgroundColor: theme.colors.background,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
+  topBarButton: {
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  topBarButtonText: {
+    fontWeight: '700',
     color: theme.colors.text,
-    textAlign: 'center',
   },
-  greeting: {
-    marginTop: theme.spacing.sm,
-    color: theme.colors.muted,
-    textAlign: 'center',
-  },
-  listName: {
-    marginTop: 2,
-    color: theme.colors.muted,
-    textAlign: 'center',
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  modeLine: {
+  infoLine: {
     marginTop: 2,
     color: theme.colors.muted,
     textAlign: 'center',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
   },
-  characterRow: {
-    marginTop: theme.spacing.sm,
+  headerRow: {
+    marginTop: 2,
     flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    gap: theme.spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
   },
   honeyLarderRow: {
-    marginTop: theme.spacing.xs,
     alignItems: 'center',
   },
   honeyLarderLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: theme.colors.muted,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
   honeyLarderPots: {
-    marginTop: 2,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: theme.spacing.sm,
+    minHeight: 26,
+    paddingVertical: 2,
+    paddingHorizontal: theme.spacing.xs,
     borderRadius: 999,
   },
   honeyLarderPotsInJeopardy: {
@@ -983,7 +1073,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.primary,
   },
   honeyLarderPotEmoji: {
-    fontSize: 18,
+    fontSize: 16,
     marginHorizontal: 1,
   },
   honeyLarderOverflow: {
@@ -1010,8 +1100,7 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xs,
   },
   score: {
-    marginTop: theme.spacing.sm,
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: '900',
     color: theme.colors.text,
     textAlign: 'center',
@@ -1020,78 +1109,66 @@ const styles = StyleSheet.create({
     textShadowRadius: 0,
   },
   targetCard: {
-    marginTop: theme.spacing.lg,
-    padding: theme.spacing.md,
+    marginTop: theme.spacing.xs,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
     borderRadius: 20,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
     borderWidth: 4,
     borderColor: '#111111',
-    minHeight: 96,
-    justifyContent: 'center',
+  },
+  targetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
   },
   targetLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: theme.colors.muted,
     textTransform: 'uppercase',
     letterSpacing: 1.2,
   },
   targetPrompt: {
-    marginTop: theme.spacing.xs,
-    fontSize: 32,
+    fontSize: 20,
   },
   answerRow: {
-    marginTop: theme.spacing.sm,
+    marginTop: 4,
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'center',
-    minHeight: 48,
     alignItems: 'center',
+    gap: 3,
   },
   answerTile: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: theme.spacing.xs,
     backgroundColor: theme.colors.primary,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#111111',
   },
   answerTileText: {
-    fontSize: 18,
     fontWeight: '700',
     color: theme.colors.surface,
   },
   answerSlot: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: theme.spacing.xs,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#D4A41C',
     backgroundColor: 'rgba(255,255,255,0.7)',
   },
   answerSlotText: {
-    fontSize: 18,
     color: theme.colors.muted,
   },
-  fieldLabel: {
-    marginTop: theme.spacing.lg,
-    fontSize: 14,
-    fontWeight: '700',
-    color: theme.colors.text,
-    textAlign: 'center',
-  },
   field: {
-    marginTop: theme.spacing.sm,
+    flex: 1,
+    minHeight: 110,
+    marginTop: theme.spacing.xs,
     alignSelf: 'center',
     width: '100%',
-    maxWidth: 320,
-    aspectRatio: 1,
+    maxWidth: 560,
     borderRadius: 24,
     backgroundColor: '#F5D998',
     borderWidth: 4,
@@ -1117,20 +1194,17 @@ const styles = StyleSheet.create({
     fontSize: 34,
   },
   tileGrid: {
-    marginTop: theme.spacing.lg,
+    marginTop: theme.spacing.xs,
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
+    gap: FLICK_TILE_GAP,
   },
   tileButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    margin: 6,
     backgroundColor: theme.colors.secondary,
-    borderWidth: 4,
+    borderWidth: 3,
     borderColor: '#111111',
     shadowColor: '#111111',
     shadowOpacity: 0.8,
@@ -1141,7 +1215,6 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   tileButtonText: {
-    fontSize: 22,
     fontWeight: '700',
     color: theme.colors.surface,
   },
@@ -1163,10 +1236,15 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: theme.colors.text,
   },
+  bottomBar: {
+    marginTop: theme.spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
   feedback: {
-    marginTop: theme.spacing.lg,
-    textAlign: 'center',
-    fontSize: 15,
+    flex: 1,
+    fontSize: 13,
     fontWeight: '700',
   },
   feedbackSuccess: {
@@ -1214,32 +1292,9 @@ const styles = StyleSheet.create({
     color: theme.colors.surface,
     textAlign: 'center',
   },
-  backButton: {
-    position: 'absolute',
-    top: theme.spacing.lg,
-    left: theme.spacing.lg,
-    paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.sm,
-    borderRadius: 999,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 3,
-    borderColor: '#111111',
-    zIndex: 10,
-  },
-  backButtonText: {
-    fontWeight: '700',
-    color: theme.colors.text,
-  },
-  cornerButtons: {
-    position: 'absolute',
-    top: theme.spacing.lg,
-    right: theme.spacing.lg,
-    gap: theme.spacing.xs,
-    zIndex: 10,
-  },
   cornerButton: {
-    width: 52,
-    height: 52,
+    width: 44,
+    height: 44,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1247,12 +1302,15 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#111111',
     shadowColor: '#111111',
-    shadowOffset: { width: 3, height: 3 },
+    shadowOffset: { width: 2, height: 2 },
     shadowOpacity: 0.9,
     shadowRadius: 0,
   },
   cornerButtonEmoji: {
-    fontSize: 24,
+    fontSize: 20,
+  },
+  controlHidden: {
+    opacity: 0,
   },
   bannerOverlay: {
     position: 'absolute',
@@ -1271,9 +1329,9 @@ const styles = StyleSheet.create({
     borderWidth: 6,
     borderColor: '#111111',
     paddingVertical: theme.spacing.xl,
-    paddingHorizontal: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.md,
     alignItems: 'center',
-    maxWidth: '85%',
+    maxWidth: '92%',
     shadowColor: '#111111',
     shadowOffset: { width: 6, height: 6 },
     shadowOpacity: 1,
@@ -1297,13 +1355,6 @@ const styles = StyleSheet.create({
     color: theme.colors.surface,
     textAlign: 'center',
   },
-  actionsRow: {
-    marginTop: theme.spacing.lg,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: theme.spacing.sm,
-  },
   secondaryButton: {
     alignSelf: 'center',
     paddingVertical: theme.spacing.xs,
@@ -1318,10 +1369,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   exitButton: {
-    alignSelf: 'center',
-    paddingVertical: theme.spacing.xs,
+    minHeight: 44,
     paddingHorizontal: theme.spacing.sm,
     borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: theme.colors.accent,
     borderWidth: 3,
     borderColor: '#111111',

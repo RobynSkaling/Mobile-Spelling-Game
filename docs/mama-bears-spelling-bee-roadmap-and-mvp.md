@@ -1510,6 +1510,55 @@ As a child aged 5–9, I want to see all my letters and flick them into the hone
 
 Nothing. **First priority.**
 
+#### Revised: Implemented
+
+Honey Pot Flick fits on a phone again and the layout is now guarded by a one-command smoke check. What landed:
+
+- **Root cause.** `PlayScreen.tsx` was a non-scrolling `flex: 1` column with `justifyContent: 'center'`, so any content taller than the screen was clipped equally at the top and the bottom, which is exactly the symptom (Honey Saved hidden behind Back, letters below the fold). The content outgrew the phone one epic at a time, and nobody re-checked at phone size:
+  - `2d4ecb9` (the original flick epic) made the pot field a fixed **320px square** (`aspectRatio: 1`, `maxWidth: 320`). That alone is 48% of a 667px phone.
+  - `ef15f6c` (Epic 10, villains) added the character row (Mama Bear at the 96px `medium` size).
+  - `1029e45` (Epic 10.5) added the honey-larder row.
+  - Earlier modes work (`c825be4`) added the mode line and the absolutely positioned hint and megaphone buttons, and the greeting, list name, score and a 96px prompt card were already stacked above the field.
+  - Epic 25's two-line change is not involved, as the PM suspected. There were no JS errors. The gesture itself was never broken: once the letters were on screen, flicks worked (see Verification).
+- **Layout rework** (`PlayScreen.tsx`). The pot field is now the one flexible region (`flex: 1`), so it takes whatever height the rest leaves, and everything else is sized first:
+  - A top bar holds Back, Reset and Word Lists (44pt touch targets; Exit joins them only on tall screens, since it is a web-preview leftover).
+  - One info line ("Honey Pot Flick · Mode · List") replaces the title, greeting, list line and mode line.
+  - The characters sit either side of Score and the honey larder in a single row (52px on phones, 80px on tablets).
+  - The prompt and the answer tiles share one card. Answer tiles shrink so the whole word stays on one row.
+  - The letter tray sits under the field, and the feedback line shares a bottom row with the hint and megaphone buttons (44pt). Those buttons stay mounted and fade out under the word-reveal banner instead of unmounting, so the layout no longer jumps.
+  - Safe-area insets are applied to the top and bottom padding.
+- **Sizing is pure and tested** (`src/features/play/logic/honey-pot-layout.ts`). Tile size is the largest size between 36 and 58px whose wrapped rows fit 26% of the screen height. The tray is sized from the round's full letter count, so the field doesn't resize each time a letter is caught. When the field does change size (a new word), the pot is re-placed so it can never sit outside the field.
+- **Word banner.** The reveal banner's 48px word was clipped at 320px wide for a 13-letter word ("QUESTIONNAIRE"). It now scales down to fit (`getBannerFontSize`). This was found while taking the screenshots.
+- **Smoke check** (`scripts/layout-smoke.mjs`, `npm run smoke:layout`). See "How to run the layout smoke check" below.
+
+**Judgment calls:**
+
+- Following the epic's open question, the characters shrank first. The larder, hint and megaphone were kept as part of play.
+- The greeting ("Hi {name}! Mama Bear is cheering for you.") and the separate "Honey Pot Flick" title were dropped from this screen to buy vertical room. Say so if the greeting should come back on tablets.
+- The floor of 36px for tiles is smaller than Epic 29's 40px floor for Bee Line. It is only reached at 320x568 in Crazy! and Impossible!! with long words. Flick tiles are dragged rather than tapped, and the alternative was losing the pot's room. Product to review.
+- Exit is hidden on phones (screens 760px tall or less). Back already goes home.
+
+**How to run the layout smoke check:** `npm run smoke:layout`. It builds a web export into a temp folder, serves it, drives headless Chrome (found via `CHROME_PATH`, or the default Windows, macOS and Linux locations) over the DevTools protocol, and needs no new dependencies (Node 22 or later, for the global `WebSocket`). It seeds the longest built-in word ("questionnaire", 13 letters) as a custom list and, for every mode at 320x568, 375x667 and 768x1024, fails (exit 1) if any letter tile, the pot, the prompt card, Back, the larder, hint or megaphone is off-screen, if any of those overlap each other, if the pot is outside the field, if the page scrolls, or if the screen is so over-full that a text row was squeezed to nothing. Options: `--dist <dir>` reuses an existing export, `--shots <dir>` saves a PNG per case, `--sizes 320x568,375x667` limits the viewports. It was run against an over-tight viewport (320x400) and correctly failed with off-screen tiles, so the guard does catch the original bug.
+
+**Verification:**
+
+- `npm test`: 167/167 (156 before; 11 new in `honey-pot-layout.test.ts`). `npx tsc --noEmit` clean. Web export builds. `npm run smoke:layout`: 12 of 12 cases pass.
+- **Measured (web export, headless Chrome), "questionnaire" with decoys:**
+
+  | Viewport | Mode | Letters | Tile | Field height |
+  |---|---|---|---|---|
+  | 320x568 | Easy / Hard / Crazy! / Impossible!! | 13 / 16 / 19 / 21 | 45 / 43 / 36 / 36 px | 116 / 122 / 143 / 143 px |
+  | 375x667 | Easy / Hard / Crazy! / Impossible!! | 13 / 16 / 19 / 21 | 53 / 52 / 43 / 43 px | 190 / 193 / 220 / 220 px |
+  | 768x1024 | all four | 13-21 | 58 px | 569 px |
+
+- **Aim and flick, end to end** (headless Chrome, scripted pointer events): at 375x667 with a mouse, and at 320x568 with emulated touch, pressing a letter, dragging and releasing at the pot was accepted for each correct letter ("Nice throw!"). The whole word then showed "Perfect!", the celebration ran, the next word loaded with a fresh tray, and `dailyRewards.v1` was persisted (the Epic 25 streak/sticker hook).
+- Screenshots were viewed at 320x568, 375x667 and 768x1024 in all four modes: nothing clipped, nothing overlapping.
+
+**Not met / still owed, stated plainly:**
+
+- **No real-device test was done.** The acceptance criterion "checked on a real phone" is still owed by the product owner: please check a notch phone for safe-area padding, real-finger flicking and the 36-45px tiles in Crazy!/Impossible!!. All checks above are web export only.
+- Wrong-letter, miss, steal and villain-reaction paths were not changed in logic, but they were not re-played by hand end to end beyond the three scripted correct flicks.
+
 ---
 
 ### Epic 29 — Fix Bee Line: Smaller, Well-Spaced Letters in a Bigger Play Area (P0)
