@@ -5,6 +5,8 @@ import { theme } from '@/shared/lib/theme';
 import { useActiveChild } from '@/stores/family-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useProgressStore } from '@/stores/progress-store';
+import { useFinalTestStore } from '@/stores/final-test-store';
+import { buildFinalTestResult } from '@/stores/final-test-results-logic';
 import { speechService } from '@/shared/lib/speech';
 import { Confetti } from '@/shared/ui/Confetti';
 import { buildLetterBundle } from '@/features/play/logic/honey-pot-flick';
@@ -27,6 +29,7 @@ export function FinalTestScreen() {
   const startSession = useProgressStore((state) => state.startSession);
   const recordWordCompleted = useProgressStore((state) => state.recordWordCompleted);
   const recordMissedFlick = useProgressStore((state) => state.recordMissedFlick);
+  const recordFinalTestResult = useFinalTestStore((state) => state.recordResult);
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [testWords, setTestWords] = useState<string[]>([]);
@@ -145,6 +148,20 @@ export function FinalTestScreen() {
     }
 
     const isLastWord = wordIndex + 1 >= testWords.length;
+    if (isLastWord && selectedList) {
+      const finalWords = [...results, { word: currentTestWord, correct }];
+      const correctTotal = finalWords.filter((entry) => entry.correct).length;
+      recordFinalTestResult(
+        buildFinalTestResult({
+          id: `final-test-${Date.now()}`,
+          takenAt: Date.now(),
+          listId: selectedList.id,
+          listName: selectedList.name,
+          words: finalWords,
+          passed: hasPassed(correctTotal, finalWords.length),
+        }),
+      );
+    }
     setTimeout(() => {
       if (isLastWord) {
         setPhase('results');

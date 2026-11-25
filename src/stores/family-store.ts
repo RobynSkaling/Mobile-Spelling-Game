@@ -16,12 +16,10 @@ import {
   updateChild,
   verifyPin,
 } from './family-logic';
+import { childDataKeys, FAMILY_BLOB_KEY, LEGACY_PROFILE_KEY } from './child-data-logic';
 
 /** The whole family is one JSON blob (atomic writes), like daily-rewards-store. */
-const FAMILY_KEY = 'family.v1';
-/** The pre-Epic-30 single profile. Read once for migration and deliberately left in place: Epic 31
- *  owns cleaning up per-device keys once per-child data is migrated too. */
-const LEGACY_PROFILE_KEY = 'profile';
+const FAMILY_KEY = FAMILY_BLOB_KEY;
 
 function persist(family: FamilyState) {
   AsyncStorage.setItem(FAMILY_KEY, JSON.stringify(family));
@@ -142,6 +140,9 @@ export const useFamilyStore = create<FamilyStore>((set, get) => {
         return { error: result.error };
       }
       commit(result.family);
+      // After commit, so a removed active child has already been swapped out of the per-child stores
+      // (which stop writing for it) before its keys are deleted. Only this child's keys are touched.
+      AsyncStorage.multiRemove(childDataKeys(id));
       return { error: null };
     },
 

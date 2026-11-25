@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const SESSIONS_KEY = 'progress.sessions';
-const WORD_STATS_KEY = 'progress.wordStats';
+import { childKey, PROGRESS_SESSIONS_BASE_KEY, PROGRESS_WORD_STATS_BASE_KEY } from './child-data-logic';
+
 const MAX_STORED_SESSIONS = 50;
 
 export type SessionRecord = {
@@ -20,17 +20,23 @@ export type WordStat = {
   lastPlayedAt: number;
 };
 
-function persist(sessions: SessionRecord[], wordStats: Record<string, WordStat>) {
-  AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-  AsyncStorage.setItem(WORD_STATS_KEY, JSON.stringify(wordStats));
+/** Writes to the loaded child's keys; with no child loaded (before setup) there is nowhere to write. */
+function persist(childId: string | null, sessions: SessionRecord[], wordStats: Record<string, WordStat>) {
+  if (!childId) {
+    return;
+  }
+  AsyncStorage.setItem(childKey(PROGRESS_SESSIONS_BASE_KEY, childId), JSON.stringify(sessions));
+  AsyncStorage.setItem(childKey(PROGRESS_WORD_STATS_BASE_KEY, childId), JSON.stringify(wordStats));
 }
 
 interface ProgressState {
   sessions: SessionRecord[];
   wordStats: Record<string, WordStat>;
   currentSessionId: string | null;
+  /** The child whose progress is in memory; every write goes to this child's keys. */
+  loadedChildId: string | null;
   isHydrated: boolean;
-  loadProgress: () => Promise<void>;
+  loadForChild: (childId: string | null) => Promise<void>;
   startSession: () => void;
   recordCorrectFlick: () => void;
   recordMissedFlick: (word: string) => void;
@@ -42,13 +48,21 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
   sessions: [],
   wordStats: {},
   currentSessionId: null,
+  loadedChildId: null,
   isHydrated: false,
 
-  loadProgress: async () => {
-    const [storedSessions, storedWordStats] = await Promise.all([
-      AsyncStorage.getItem(SESSIONS_KEY),
-      AsyncStorage.getItem(WORD_STATS_KEY),
-    ]);
+  loadForChild: async (childId) => {
+    // Reset synchronously so the previous child's progress is never shown or written for the new child.
+    set({ sessions: [], wordStats: {}, currentSessionId: null, loadedChildId: childId, isHydrated: false });
+    const [storedSessions, storedWordStats] = childId
+      ? await Promise.all([
+          AsyncStorage.getItem(childKey(PROGRESS_SESSIONS_BASE_KEY, childId)),
+          AsyncStorage.getItem(childKey(PROGRESS_WORD_STATS_BASE_KEY, childId)),
+        ])
+      : [null, null];
+    if (get().loadedChildId !== childId) {
+      return; // switched again while loading; the newer load owns the state
+    }
 
     set({
       sessions: storedSessions ? JSON.parse(storedSessions) : [],
@@ -69,7 +83,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     const nextSessions = [newSession, ...get().sessions].slice(0, MAX_STORED_SESSIONS);
 
     set({ sessions: nextSessions, currentSessionId: id });
-    persist(nextSessions, get().wordStats);
+    persist(get().loadedChildId, nextSessions, get().wordStats);
   },
 
   recordCorrectFlick: () => {
@@ -79,7 +93,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     );
 
     set({ sessions: nextSessions });
-    persist(nextSessions, wordStats);
+    persist(get().loadedChildId, nextSessions, wordStats);
   },
 
   recordMissedFlick: (word) => {
@@ -99,7 +113,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     };
 
     set({ sessions: nextSessions, wordStats: nextWordStats });
-    persist(nextSessions, nextWordStats);
+    persist(get().loadedChildId, nextSessions, nextWordStats);
   },
 
   recordWordCompleted: (word) => {
@@ -119,7 +133,7 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     };
 
     set({ sessions: nextSessions, wordStats: nextWordStats });
-    persist(nextSessions, nextWordStats);
+    persist(get().loadedChildId, nextSessions, nextWordStats);
   },
 
   clearWordStats: (words) => {
@@ -130,6 +144,6 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     );
 
     set({ wordStats: nextWordStats });
-    persist(sessions, nextWordStats);
+    persist(get().loadedChildId, sessions, nextWordStats);
   },
 }));

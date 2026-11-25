@@ -22,8 +22,11 @@ function createInitialState(): DailyRewardsState {
   };
 }
 
-function persist(rewards: DailyRewardsState) {
-  AsyncStorage.setItem(dailyRewardsKey(), JSON.stringify(rewards));
+function persist(childId: string | null, rewards: DailyRewardsState) {
+  if (!childId) {
+    return;
+  }
+  AsyncStorage.setItem(dailyRewardsKey(childId), JSON.stringify(rewards));
 }
 
 /**
@@ -56,8 +59,10 @@ interface DailyRewardsStore {
   streak: DailyStreakState;
   album: StickerAlbumState;
   schemaVersion: number;
+  /** The child whose streak and album are in memory; every write goes to this child's key. */
+  loadedChildId: string | null;
   isHydrated: boolean;
-  loadDailyRewards: () => Promise<void>;
+  loadForChild: (childId: string | null) => Promise<void>;
   /** Called on any word/round completion, in any game, per architecture 27.6's shared
    *  completed-session signal. Debounced to once per DayKey. Must never import session-store.ts or
    *  write to progress-store.ts — this store only observes "a completed session happened today." */
@@ -70,10 +75,16 @@ export const useDailyRewardsStore = create<DailyRewardsStore>((set, get) => ({
   streak: INITIAL_STATE.streak,
   album: INITIAL_STATE.album,
   schemaVersion: INITIAL_STATE.schemaVersion,
+  loadedChildId: null,
   isHydrated: false,
 
-  loadDailyRewards: async () => {
-    const stored = await AsyncStorage.getItem(dailyRewardsKey());
+  loadForChild: async (childId) => {
+    // Reset synchronously so the previous child's streak/stickers are never shown or written for the new child.
+    set({ streak: INITIAL_STATE.streak, album: INITIAL_STATE.album, loadedChildId: childId, isHydrated: false });
+    const stored = childId ? await AsyncStorage.getItem(dailyRewardsKey(childId)) : null;
+    if (get().loadedChildId !== childId) {
+      return; // switched again while loading; the newer load owns the state
+    }
     const rewards: DailyRewardsState = stored ? JSON.parse(stored) : createInitialState();
 
     set({
@@ -106,6 +117,6 @@ export const useDailyRewardsStore = create<DailyRewardsStore>((set, get) => ({
     const nextState: DailyRewardsState = { streak: outcome.streak, album: nextAlbum, schemaVersion };
 
     set({ streak: nextState.streak, album: nextState.album });
-    persist(nextState);
+    persist(get().loadedChildId, nextState);
   },
 }));

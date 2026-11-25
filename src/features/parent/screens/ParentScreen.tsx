@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useProgressStore } from '@/stores/progress-store';
-import { useActiveChild, useFamilyStore } from '@/stores/family-store';
+import { useActiveChild } from '@/stores/family-store';
 import { RequireParent } from '@/features/family/components/RequireParent';
 import { useWordListStore } from '@/stores/word-list-store';
 
@@ -27,7 +27,6 @@ export function ParentScreen() {
 
 function ParentReport() {
   const activeChild = useActiveChild();
-  const childCount = useFamilyStore((state) => state.children.length);
   const sessions = useProgressStore((state) => state.sessions);
   const wordStats = useProgressStore((state) => state.wordStats);
   const clearWordStats = useProgressStore((state) => state.clearWordStats);
@@ -115,14 +114,8 @@ function ParentReport() {
           <Text style={styles.manageChildrenText}>👪 Manage children</Text>
         </Pressable>
 
-        {/* Progress is still stored per device until Epic 31 makes it per child, so with more than
-            one child these numbers are everyone's together; say so rather than pin them on one name. */}
         <Text style={styles.subtitle}>
-          {childCount > 1
-            ? "Everyone's practice on this device (per-child reports coming soon)"
-            : activeChild
-              ? `How ${activeChild.name} is doing`
-              : 'How your child is doing'}
+          {activeChild ? `How ${activeChild.name} is doing` : 'How your child is doing'}
         </Text>
 
         {!hasActivity ? (

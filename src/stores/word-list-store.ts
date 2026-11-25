@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BUILT_IN_WORD_LISTS } from '@/data/word-lists/built-in-word-lists';
+import { childKey, SELECTED_LIST_BASE_KEY } from './child-data-logic';
 import { MAX_CUSTOM_LISTS, MAX_WORDS_PER_LIST, WordList } from '@/features/word-lists/types';
 
 const CUSTOM_LISTS_KEY = 'word-lists.custom';
-const SELECTED_LIST_KEY = 'word-lists.selectedId';
 
 type ActionResult = { success: boolean; error: string | null };
 
@@ -21,16 +21,27 @@ function randomBuiltInId(): string {
   return BUILT_IN_WORD_LISTS[index].id;
 }
 
-function persist(customLists: WordList[], selectedListId: string | null) {
+/** Custom lists are shared by the whole family; only the selected list id is per child. */
+function persist(customLists: WordList[]) {
   AsyncStorage.setItem(CUSTOM_LISTS_KEY, JSON.stringify(customLists));
-  AsyncStorage.setItem(SELECTED_LIST_KEY, selectedListId ?? '');
+}
+
+function persistSelected(childId: string | null, selectedListId: string | null) {
+  if (childId) {
+    AsyncStorage.setItem(childKey(SELECTED_LIST_BASE_KEY, childId), selectedListId ?? '');
+  }
 }
 
 interface WordListState {
   customLists: WordList[];
   selectedListId: string | null;
+  /** The child whose selected list is in memory. */
+  loadedChildId: string | null;
   isHydrated: boolean;
+  /** Loads the family-shared custom lists. */
   loadLists: () => Promise<void>;
+  /** Loads this child's selected list. Needs `loadLists` finished first, to notice a deleted list. */
+  loadSelectedForChild: (childId: string | null) => Promise<void>;
   getListById: (id: string) => WordList | undefined;
   getSelectedList: () => WordList | undefined;
   selectList: (id: string) => void;
@@ -46,24 +57,29 @@ interface WordListState {
 export const useWordListStore = create<WordListState>((set, get) => ({
   customLists: [],
   selectedListId: null,
+  loadedChildId: null,
   isHydrated: false,
 
   loadLists: async () => {
-    const [storedLists, storedSelected] = await Promise.all([
-      AsyncStorage.getItem(CUSTOM_LISTS_KEY),
-      AsyncStorage.getItem(SELECTED_LIST_KEY),
-    ]);
+    const storedLists = await AsyncStorage.getItem(CUSTOM_LISTS_KEY);
+    set({ customLists: storedLists ? JSON.parse(storedLists) : [], isHydrated: true });
+  },
 
-    const customLists: WordList[] = storedLists ? JSON.parse(storedLists) : [];
-    const allIds = new Set([...BUILT_IN_WORD_LISTS.map((list) => list.id), ...customLists.map((list) => list.id)]);
-
-    let selectedListId = storedSelected || null;
-    if (!selectedListId || !allIds.has(selectedListId)) {
-      selectedListId = randomBuiltInId();
-      AsyncStorage.setItem(SELECTED_LIST_KEY, selectedListId);
+  loadSelectedForChild: async (childId) => {
+    set({ selectedListId: null, loadedChildId: childId });
+    const stored = childId ? await AsyncStorage.getItem(childKey(SELECTED_LIST_BASE_KEY, childId)) : null;
+    if (get().loadedChildId !== childId) {
+      return; // switched again while loading; the newer load owns the state
     }
 
-    set({ customLists, selectedListId, isHydrated: true });
+    const { customLists } = get();
+    const allIds = new Set([...BUILT_IN_WORD_LISTS.map((list) => list.id), ...customLists.map((list) => list.id)]);
+    let selectedListId = stored || null;
+    if (!selectedListId || !allIds.has(selectedListId)) {
+      selectedListId = randomBuiltInId();
+      persistSelected(childId, selectedListId);
+    }
+    set({ selectedListId });
   },
 
   getListById: (id) => {
@@ -77,7 +93,7 @@ export const useWordListStore = create<WordListState>((set, get) => ({
 
   selectList: (id) => {
     set({ selectedListId: id });
-    AsyncStorage.setItem(SELECTED_LIST_KEY, id);
+    persistSelected(get().loadedChildId, id);
   },
 
   createList: (name) => {
@@ -103,7 +119,7 @@ export const useWordListStore = create<WordListState>((set, get) => ({
 
     const nextLists = [...customLists, newList];
     set({ customLists: nextLists });
-    persist(nextLists, get().selectedListId);
+    persist(nextLists);
     return { list: newList, error: null };
   },
 
@@ -148,7 +164,7 @@ export const useWordListStore = create<WordListState>((set, get) => ({
 
     const nextLists = [...customLists, newList];
     set({ customLists: nextLists });
-    persist(nextLists, get().selectedListId);
+    persist(nextLists);
     return { list: newList, error: null };
   },
 
@@ -162,7 +178,7 @@ export const useWordListStore = create<WordListState>((set, get) => ({
       list.id === id ? { ...list, name: trimmedName, updatedAt: Date.now() } : list,
     );
     set({ customLists: nextLists });
-    persist(nextLists, get().selectedListId);
+    persist(nextLists);
   },
 
   deleteList: (id) => {
@@ -171,7 +187,8 @@ export const useWordListStore = create<WordListState>((set, get) => ({
     const nextSelectedId = selectedListId === id ? randomBuiltInId() : selectedListId;
 
     set({ customLists: nextLists, selectedListId: nextSelectedId });
-    persist(nextLists, nextSelectedId);
+    persist(nextLists);
+    persistSelected(get().loadedChildId, nextSelectedId);
   },
 
   addWord: (listId, word) => {
@@ -196,7 +213,7 @@ export const useWordListStore = create<WordListState>((set, get) => ({
       l.id === listId ? { ...l, words: [...l.words, normalized], updatedAt: Date.now() } : l,
     );
     set({ customLists: nextLists });
-    persist(nextLists, get().selectedListId);
+    persist(nextLists);
     return { success: true, error: null };
   },
 
@@ -221,7 +238,7 @@ export const useWordListStore = create<WordListState>((set, get) => ({
         : l,
     );
     set({ customLists: nextLists });
-    persist(nextLists, get().selectedListId);
+    persist(nextLists);
     return { success: true, error: null };
   },
 
@@ -230,6 +247,6 @@ export const useWordListStore = create<WordListState>((set, get) => ({
       l.id === listId ? { ...l, words: l.words.filter((_, i) => i !== index), updatedAt: Date.now() } : l,
     );
     set({ customLists: nextLists });
-    persist(nextLists, get().selectedListId);
+    persist(nextLists);
   },
 }));
