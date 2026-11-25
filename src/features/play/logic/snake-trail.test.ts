@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendTrailPathPoint, resolveTrailSegmentPositions } from './snake-trail';
+import { appendTrailPathPoint, beginSteering, resolveTrailSegmentPositions, stepSteering } from './snake-trail';
 
 describe('resolveTrailSegmentPositions', () => {
   it('returns an empty array for zero or negative segment counts', () => {
@@ -119,5 +119,46 @@ describe('appendTrailPathPoint', () => {
       { x: 30, y: 0 },
       { x: 40, y: 0 },
     ]);
+  });
+});
+
+describe('head steering', () => {
+  const bounds = { minX: 0, maxX: 300, minY: 0, maxY: 300 };
+  const options = { leadPx: 40, rampPx: 20, bounds };
+
+  it('does not move the head when the finger first grabs it', () => {
+    const state = beginSteering({ x: 100, y: 100 }, { x: 110, y: 112 });
+    const { head } = stepSteering(state, { x: 110, y: 112 }, options);
+    assert.deepEqual(head, { x: 100, y: 100 });
+  });
+
+  it('moves the head by the finger movement and leads ahead of it in the travel direction', () => {
+    let state = beginSteering({ x: 100, y: 100 }, { x: 0, y: 0 });
+    let head = { x: 100, y: 100 };
+    for (let x = 10; x <= 200; x += 10) {
+      ({ state, head } = stepSteering(state, { x, y: 0 }, options));
+    }
+    // The finger travelled 200px right; the head is its base (300 clamps at the wall) plus a lead.
+    assert.ok(head.x > state.base.x - 1e-9 || head.x === bounds.maxX);
+    assert.ok(state.lead.x > 30 && state.lead.x <= 40);
+    assert.ok(Math.abs(state.lead.y) < 1e-6);
+  });
+
+  it('ramps the lead in rather than snapping it on at the start of a drag', () => {
+    const state = beginSteering({ x: 100, y: 100 }, { x: 0, y: 0 });
+    const { head } = stepSteering(state, { x: 5, y: 0 }, options);
+    assert.ok(head.x - 105 < 40 * 0.3);
+  });
+
+  it('keeps the head inside the bounds even when the finger keeps going', () => {
+    let state = beginSteering({ x: 290, y: 290 }, { x: 0, y: 0 });
+    let head = { x: 290, y: 290 };
+    for (let i = 1; i <= 50; i += 1) {
+      ({ state, head } = stepSteering(state, { x: i * 10, y: i * 10 }, options));
+    }
+    assert.ok(head.x <= bounds.maxX && head.y <= bounds.maxY);
+    // And it comes straight back when the finger reverses, rather than staying stuck at the wall.
+    ({ head } = stepSteering(state, { x: 490, y: 490 }, options));
+    assert.ok(head.x < bounds.maxX + 1e-9);
   });
 });

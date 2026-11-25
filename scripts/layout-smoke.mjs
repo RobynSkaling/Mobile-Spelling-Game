@@ -1,10 +1,11 @@
 // Layout smoke check: builds (or serves) the web export, drives headless Chrome over the DevTools
-// protocol, and fails if anything needed to play is off-screen or overlapping at phone sizes.
+// protocol, and fails if anything needed to play Honey Pot Flick or Bee Line is off-screen, overlapping
+// or (Bee Line) too crowded at phone sizes.
 // Plain Node (>= 22, for the global WebSocket) — no extra dependencies.
 //
 //   npm run smoke:layout                      build the web export, check every size and mode
 //   npm run smoke:layout -- --dist <dir>      reuse an existing `expo export --platform web` folder
-//   npm run smoke:layout -- --shots <dir>     also save a PNG per case
+//   npm run smoke:layout -- --shots <dir>     also save a PNG per case (<route>-<size>-<mode>.png)
 //   npm run smoke:layout -- --sizes 320x568   only these viewports (comma-separated WxH)
 //   CHROME_PATH=<chrome.exe> npm run smoke:layout   if Chrome isn't in a default location
 import http from 'node:http';
@@ -242,11 +243,144 @@ function findFlickLayoutProblems(rects, { mode, expectedLetters }) {
   return problems;
 }
 
-async function waitForPlayable(evaluate, expectedLetters) {
+
+// Bee Line (Epic 29). Tile hexes expose `bee-line-hex-<id>` (drawn size); easy mode's tap targets are
+// `bee-line-tile-<id>`.
+const COLLECT_BEE_LINE_RECTS = `(() => {
+  const toRect = (el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+  };
+  const byId = (id) => [...document.querySelectorAll('[data-testid="' + id + '"]')].map(toRect);
+  const byPrefix = (prefix) => [...document.querySelectorAll('[data-testid^="' + prefix + '"]')].map(toRect);
+  return {
+    'info-line': byId('info-line'), 'back-button': byId('back-button'), 'prompt-row': byId('prompt-row'),
+    'word-so-far': byId('word-so-far'), 'bee-line-field': byId('bee-line-field'),
+    'megaphone-button': byId('megaphone-button'),
+    hexes: byPrefix('bee-line-hex-'), tapTargets: byPrefix('bee-line-tile-'),
+    page: { innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+      scrollHeight: document.documentElement.scrollHeight, scrollWidth: document.documentElement.scrollWidth },
+  };
+})()`;
+
+const MIN_FIELD_SHARE = 0.6;
+const MIN_TILE_PX = 40;
+
+function findBeeLineLayoutProblems(rects, { mode, wordLength }) {
+  const problems = [];
+  const { innerWidth, innerHeight } = rects.page;
+  const EPS = 0.5;
+
+  for (const id of ['info-line', 'back-button', 'prompt-row', 'word-so-far', 'bee-line-field', 'megaphone-button']) {
+    if (rects[id].length !== 1) problems.push(`expected exactly one "${id}", found ${rects[id].length}`);
+  }
+  if (rects.hexes.length < wordLength) {
+    problems.push(`expected at least ${wordLength} tiles, found ${rects.hexes.length}`);
+  }
+
+  const onScreen = (label, rect) => {
+    if (rect.left < -EPS || rect.top < -EPS || rect.right > innerWidth + EPS || rect.bottom > innerHeight + EPS) {
+      problems.push(`${label} is off-screen: [${round(rect.left)},${round(rect.top)} - ${round(rect.right)},${round(rect.bottom)}] in ${innerWidth}x${innerHeight}`);
+    }
+  };
+  for (const id of ['info-line', 'back-button', 'prompt-row', 'word-so-far', 'bee-line-field', 'megaphone-button']) {
+    rects[id].forEach((rect) => onScreen(id, rect));
+  }
+  rects.hexes.forEach((rect, index) => onScreen(`tile[${index}]`, rect));
+
+  const field = rects['bee-line-field'][0];
+  if (field) {
+    const share = field.height / innerHeight;
+    if (share < MIN_FIELD_SHARE) {
+      problems.push(`play field is only ${Math.round(share * 100)}% of the screen height (needs ${MIN_FIELD_SHARE * 100}%)`);
+    }
+    rects.hexes.forEach((rect, index) => {
+      if (rect.left < field.left - EPS || rect.right > field.right + EPS || rect.top < field.top - EPS || rect.bottom > field.bottom + EPS) {
+        problems.push(`tile[${index}] is outside the play field`);
+      }
+    });
+  }
+
+  const infoLine = rects['info-line'][0];
+  if (infoLine && infoLine.height < 10) {
+    problems.push(`info line was squeezed to ${round(infoLine.height)}px: the screen is over-full`);
+  }
+
+  const centre = (r) => ({ x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 });
+  for (let i = 0; i < rects.hexes.length; i += 1) {
+    const a = rects.hexes[i];
+    if (a.width < MIN_TILE_PX - EPS) problems.push(`tile[${i}] is ${round(a.width)}px, below the ${MIN_TILE_PX}px minimum`);
+    for (let j = i + 1; j < rects.hexes.length; j += 1) {
+      const b = rects.hexes[j];
+      const gap = Math.hypot(centre(a).x - centre(b).x, centre(a).y - centre(b).y) - a.width;
+      if (gap < a.width - EPS) {
+        problems.push(`tiles ${i} and ${j} have only ${round(gap)}px between them (need ${round(a.width)}px, one tile-width)`);
+      }
+    }
+  }
+
+  if (mode === 'easy') {
+    rects.tapTargets.forEach((rect, index) => {
+      if (rect.width < 44 - EPS || rect.height < 44 - EPS) {
+        problems.push(`tap target ${index} is ${round(rect.width)}x${round(rect.height)}, below 44`);
+      }
+    });
+  }
+
+  if (rects.page.scrollHeight > innerHeight + 1) {
+    problems.push(`page scrolls: scrollHeight ${rects.page.scrollHeight} > viewport ${innerHeight}`);
+  }
+  return problems;
+}
+
+/** The requested decoy count per mode, read from bee-line.ts so the report can say when decoys were dropped. */
+function beeLineRequestedDecoys() {
+  const source = fs.readFileSync(path.join(repoRoot, 'src/features/play/logic/bee-line.ts'), 'utf8');
+  const config = source.slice(source.indexOf('BEE_LINE_MODE_CONFIG: Record'));
+  const counts = [...config.matchAll(/decoyLetterCount: (\d+)/g)].map((match) => Number(match[1]));
+  return Object.fromEntries(MODES.map((mode, index) => [mode, counts[index] ?? 0]));
+}
+
+const GAMES = [
+  {
+    name: 'Honey Pot Flick',
+    route: 'play',
+    tileSelector: '[data-testid="letter-tile"]',
+    readySelector: '[data-testid="honey-pot"]',
+    collect: COLLECT_RECTS,
+    check: (rects, { mode, tileCount }) => findFlickLayoutProblems(rects, { mode, expectedLetters: tileCount }),
+    summary: (rects, tileCount) => {
+      const tile = rects['letter-tile'][0];
+      const field = rects['flick-field'][0];
+      return `${tileCount} letters, tile ${tile ? round(tile.width) : '?'}px, field ${field ? round(field.height) : '?'}px tall`;
+    },
+  },
+  {
+    name: 'Bee Line',
+    route: 'bee-line',
+    tileSelector: '[data-testid^="bee-line-hex-"]',
+    readySelector: '[data-testid="bee-line-field"]',
+    collect: COLLECT_BEE_LINE_RECTS,
+    check: (rects, { mode, word }) => findBeeLineLayoutProblems(rects, { mode, wordLength: word.length }),
+    summary: (rects, tileCount, { word, mode }) => {
+      const tile = rects.hexes[0];
+      const field = rects['bee-line-field'][0];
+      const requested = beeLineRequestedDecoys()[mode];
+      const dropped = word.length + requested - tileCount;
+      return (
+        `${tileCount} letters, tile ${tile ? round(tile.width) : '?'}px, field ${field ? round(field.height) : '?'}px tall ` +
+        `(${field ? Math.round((field.height / rects.page.innerHeight) * 100) : '?'}%)` +
+        (dropped > 0 ? ` [${dropped} decoy${dropped === 1 ? '' : 's'} dropped to keep the gaps]` : '')
+      );
+    },
+  },
+];
+
+async function waitForPlayable(evaluate, game, expectedLetters) {
   const deadline = Date.now() + MAX_WAIT_MS;
   while (Date.now() < deadline) {
     const ready = await evaluate(
-      `document.querySelectorAll('[data-testid="letter-tile"]').length === ${expectedLetters} && !!document.querySelector('[data-testid="honey-pot"]')`,
+      `document.querySelectorAll('${game.tileSelector}').length === ${expectedLetters} && !!document.querySelector('${game.readySelector}')`,
     );
     if (ready) {
       await sleep(400);
@@ -293,7 +427,7 @@ async function main() {
     await send('Page.enable');
     const base = `http://127.0.0.1:${httpPort}`;
 
-    console.log(`Checking Honey Pot Flick with "${word}" (${word.length} letters)\n`);
+    console.log(`Checking "${word}" (${word.length} letters)\n`);
     for (const viewport of VIEWPORTS) {
       await send('Emulation.setDeviceMetricsOverride', {
         width: viewport.width,
@@ -301,56 +435,56 @@ async function main() {
         deviceScaleFactor: 1,
         mobile: true,
       });
-      for (const mode of MODES) {
-        await send('Page.navigate', { url: `${base}/home` });
-        await sleep(1200);
-        const list = { id: 'smoke-list', name: 'Smoke', words: [word], isBuiltIn: false, createdAt: 0, updatedAt: 0 };
-        await evaluate(`
-          localStorage.setItem('profile', JSON.stringify({ id: 'smoke', name: 'Smoke', avatar: '🐝' }));
-          localStorage.setItem('word-lists.custom', ${JSON.stringify(JSON.stringify([list]))});
-          localStorage.setItem('word-lists.selectedId', 'smoke-list');
-          localStorage.setItem('game-mode', '${mode}');
-          true`);
-        pageErrors.length = 0;
-        await send('Page.navigate', { url: `${base}/play` });
+      for (const game of GAMES) {
+        for (const mode of MODES) {
+          await send('Page.navigate', { url: `${base}/home` });
+          await sleep(1200);
+          const list = { id: 'smoke-list', name: 'Smoke', words: [word], isBuiltIn: false, createdAt: 0, updatedAt: 0 };
+          await evaluate(`
+            localStorage.setItem('profile', JSON.stringify({ id: 'smoke', name: 'Smoke', avatar: '🐝' }));
+            localStorage.setItem('word-lists.custom', ${JSON.stringify(JSON.stringify([list]))});
+            localStorage.setItem('word-lists.selectedId', 'smoke-list');
+            localStorage.setItem('game-mode', '${mode}');
+            true`);
+          pageErrors.length = 0;
+          await send('Page.navigate', { url: `${base}/${game.route}` });
 
-        // Decoy counts live in game-modes.ts; read the tile count off the page instead of duplicating them.
-        const expectedLetters = await (async () => {
-          const deadline = Date.now() + MAX_WAIT_MS;
-          while (Date.now() < deadline) {
-            const count = await evaluate(`document.querySelectorAll('[data-testid="letter-tile"]').length`);
-            if (count >= word.length) return count;
-            await sleep(250);
+          // Decoy counts live in the game configs; read the tile count off the page instead of duplicating them.
+          const tileCount = await (async () => {
+            const deadline = Date.now() + MAX_WAIT_MS;
+            while (Date.now() < deadline) {
+              const count = await evaluate(`document.querySelectorAll('${game.tileSelector}').length`);
+              if (count >= word.length) return count;
+              await sleep(250);
+            }
+            return -1;
+          })();
+          const label = `${game.name.padEnd(15)} ${viewport.name} ${mode.padEnd(10)}`;
+          if (tileCount < 0 || !(await waitForPlayable(evaluate, game, tileCount))) {
+            failures.push(`${label}: the screen never showed its letters`);
+            console.log(`FAIL ${label} screen never became playable`);
+            continue;
           }
-          return -1;
-        })();
-        const label = `${viewport.name} ${mode.padEnd(10)}`;
-        if (expectedLetters < 0 || !(await waitForPlayable(evaluate, expectedLetters))) {
-          failures.push(`${label}: the play screen never showed letters and a honey pot`);
-          console.log(`FAIL ${label} screen never became playable`);
-          continue;
-        }
 
-        const rects = await evaluate(COLLECT_RECTS);
-        const problems = findFlickLayoutProblems(rects, { mode, expectedLetters });
-        if (pageErrors.length > 0) {
-          problems.push(`JavaScript error: ${pageErrors[0].split('\n')[0]}`);
-        }
-        const tile = rects['letter-tile'][0];
-        const field = rects['flick-field'][0];
-        const summary = `${expectedLetters} letters, tile ${tile ? round(tile.width) : '?'}px, field ${field ? round(field.height) : '?'}px tall`;
-        if (problems.length === 0) {
-          console.log(`ok   ${label} ${summary}`);
-        } else {
-          console.log(`FAIL ${label} ${summary}`);
-          problems.forEach((problem) => console.log(`       - ${problem}`));
-          failures.push(`${label}: ${problems.join('; ')}`);
-        }
+          const rects = await evaluate(game.collect);
+          const problems = game.check(rects, { mode, tileCount, word });
+          if (pageErrors.length > 0) {
+            problems.push(`JavaScript error: ${pageErrors[0].split('\n')[0]}`);
+          }
+          const summary = game.summary(rects, tileCount, { word, mode });
+          if (problems.length === 0) {
+            console.log(`ok   ${label} ${summary}`);
+          } else {
+            console.log(`FAIL ${label} ${summary}`);
+            problems.forEach((problem) => console.log(`       - ${problem}`));
+            failures.push(`${label}: ${problems.join('; ')}`);
+          }
 
-        if (shotsDir) {
-          await sleep(4000); // let the word-reveal banner fade so the screenshot shows the board
-          const shot = await send('Page.captureScreenshot', { format: 'png' });
-          fs.writeFileSync(path.join(shotsDir, `play-${viewport.name}-${mode}.png`), Buffer.from(shot.result.data, 'base64'));
+          if (shotsDir) {
+            await sleep(4000); // let the word-reveal banner fade so the screenshot shows the board
+            const shot = await send('Page.captureScreenshot', { format: 'png' });
+            fs.writeFileSync(path.join(shotsDir, `${game.route}-${viewport.name}-${mode}.png`), Buffer.from(shot.result.data, 'base64'));
+          }
         }
       }
     }

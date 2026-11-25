@@ -12,7 +12,7 @@ export const POT_SIZE = 84;
 /** Fisher-Yates shuffle. `random` is injectable (defaults to `Math.random`) so callers that need
  *  deterministic output for tests — e.g. bee-line.ts's `buildBeeLineField` — can get it without a
  *  second shuffle implementation. */
-export function shuffleLetters(items: string[], random: () => number = Math.random): string[] {
+export function shuffleLetters<T = string>(items: T[], random: () => number = Math.random): T[] {
   const copy = [...items];
 
   for (let index = copy.length - 1; index > 0; index -= 1) {

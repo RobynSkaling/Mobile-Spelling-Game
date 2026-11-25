@@ -11,10 +11,10 @@ import {
   createCollectionState,
   DEFAULT_BEE_LINE_SCORE_TUNING,
   DEFAULT_BEE_LINE_TUNING,
-  DEFAULT_MIN_TILE_SPACING_PX,
   resolvePickup,
   ScatteredLetter,
 } from './bee-line';
+import { getBeeLineTileLayout } from './bee-line-layout';
 import { GAME_MODES } from './game-modes';
 
 const FIELD = { x: 0, y: 0, width: 300, height: 300 };
@@ -199,24 +199,15 @@ describe('buildBeeLineField', () => {
     };
   }
 
-  it('keeps every tile at least the default spacing apart at crazy/impossible decoy counts, on a real Bee Line field, for a typical word length (Epic 21)', () => {
-    // Epic 18's generic spacing test above already proves the invariant in the abstract with a
-    // smaller/looser scenario; this test exercises it at the actual BEE_LINE_MODE_CONFIG.crazy/
-    // .impossible decoy counts, the real BeeLineScreen.tsx field size (~340x340, styles.field), and
-    // the real default spacing (DEFAULT_MIN_TILE_SPACING_PX, unset here) for a 6-letter word — the
-    // median length across the app's built-in word lists (src/data/word-lists/built-in-word-lists.ts).
-    // Deliberately NOT the longest words in those lists (up to 13 letters): empirical probing during
-    // this epic's build found that buildBeeLineField's rejection-sampler (by design, per its own doc
-    // comment — a graceful non-throwing fallback, not a hard guarantee) starts missing the spacing
-    // target increasingly often as tile count climbs into the low-to-mid teens on this field size,
-    // independent of decoys — a pre-existing field-density ceiling (architecture 26.11's already-
-    // flagged, still-open "field density/reachability on the smallest device" item), not something
-    // this epic introduces or is scoped to fix. See this epic's roadmap addendum for the full note.
-    const beeLineField = { x: 0, y: 0, width: 340, height: 340 };
+  it('keeps a full tile-width of empty space between every pair at crazy/impossible decoy counts (Epic 29)', () => {
+    const beeLineField = { x: 0, y: 0, width: 340, height: 420 };
     const word = 'garden';
 
     for (const mode of ['crazy', 'impossible'] as const) {
-      const field = buildBeeLineField(word, BEE_LINE_MODE_CONFIG[mode].decoyLetterCount, beeLineField, {
+      const layout = getBeeLineTileLayout(beeLineField, word.length, BEE_LINE_MODE_CONFIG[mode].decoyLetterCount);
+      const field = buildBeeLineField(word, layout.decoyCount, beeLineField, {
+        tileSize: layout.tileSize,
+        minTileSpacingPx: layout.minCenterSpacingPx,
         random: seededRandom(mode === 'crazy' ? 1 : 2),
       });
 
@@ -224,11 +215,8 @@ describe('buildBeeLineField', () => {
         for (let j = i + 1; j < field.tiles.length; j += 1) {
           const a = field.tiles[i].position;
           const b = field.tiles[j].position;
-          const distance = Math.hypot(a.x - b.x, a.y - b.y);
-          assert.ok(
-            distance >= DEFAULT_MIN_TILE_SPACING_PX - 0.001,
-            `${mode}: tiles ${i} and ${j} are only ${distance}px apart`,
-          );
+          const edgeGap = Math.hypot(a.x - b.x, a.y - b.y) - layout.tileSize;
+          assert.ok(edgeGap >= layout.tileSize - 0.001, `${mode}: tiles ${i} and ${j} have only ${edgeGap}px between them`);
         }
       }
     }

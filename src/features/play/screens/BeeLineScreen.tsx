@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, Easing, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
-import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
@@ -16,7 +16,20 @@ import { Character } from '@/shared/ui/Character';
 import { useCharacterAnimationState } from '@/shared/ui/useCharacterAnimationState';
 import { GAME_MODE_CONFIG } from '@/features/play/logic/game-modes';
 import { Bounds, Point, getNextWord, toContainerRelative } from '@/features/play/logic/honey-pot-flick';
-import { appendTrailPathPoint, resolveTrailSegmentPositions } from '@/features/play/logic/snake-trail';
+import {
+  SteeringState,
+  appendTrailPathPoint,
+  beginSteering,
+  resolveTrailSegmentPositions,
+  stepSteering,
+} from '@/features/play/logic/snake-trail';
+import {
+  BEE_LINE_FIELD_EDGE_PAD_PX,
+  HEAD_LEAD_FACTOR,
+  TRAIL_SPACING_FACTOR,
+  getBeeLineTileLayout,
+} from '@/features/play/logic/bee-line-layout';
+import { getAnswerTileSize, getBannerFontSize, COMPACT_HEIGHT_PX } from '@/features/play/logic/honey-pot-layout';
 import { getVillainBehaviorTier } from '@/data/characters/villain-behavior';
 import { getEligibleVillains, pickNextVillain, VILLAIN_POOL_CONFIG } from '@/data/characters/villain-pool';
 import { getBeeLineVillainCapabilities } from '@/features/play/logic/bee-line-villain-capabilities';
@@ -32,25 +45,24 @@ import {
   createCollectionState,
   DEFAULT_BEE_LINE_SCORE_TUNING,
   DEFAULT_BEE_LINE_TUNING,
+  findTouchedTile,
   resolvePickup,
   ScatteredLetter,
 } from '@/features/play/logic/bee-line';
 
-const TILE_SIZE = 64;
-// `hard`+'s Snake/Centipede rework (roadmap Epic 19 revision note, post-playtest — see the roadmap
-// doc for why the original fixed-dock drag mechanic was replaced). There is no dock/drop-target
-// anymore: the head is steered continuously, and these two constants replace `DOCK_HIT_RADIUS`.
-// How close the steered head needs to get to a still-uncollected tile to pick it up on contact.
-const HEAD_PICKUP_RADIUS_PX = TILE_SIZE * 0.75;
-// Center-to-center spacing between trailing body segments, so a long word's tail doesn't sprawl
-// too far behind the head but segments still read as visually distinct tiles.
-const TRAIL_SEGMENT_SPACING_PX = TILE_SIZE * 0.6;
+// Tile size, pickup/bump reach and trail spacing all scale with the tile size the field's layout
+// works out (bee-line-layout.ts, Epic 29), so there is no fixed tile constant here any more.
+// Used until the field has been measured.
+const FALLBACK_TILE_SIZE_PX = 48;
+const FIELD_BORDER_PX = 4;
 // A new head-path sample is only kept once the finger has moved at least this far from the last
 // recorded one — keeps the path array from growing needlessly while the finger holds still.
 const TRAIL_PATH_MIN_POINT_SPACING_PX = 4;
 // Generous cap so even a long, wandering drag on the longest supported word can't grow the path
 // array unbounded.
 const TRAIL_PATH_MAX_POINTS = 600;
+// The lead ramps in over this much finger travel so grabbing the head doesn't snap it forward.
+const STEERING_RAMP_PX = 24;
 const CELEBRATION_BURST_MS = 800;
 const CELEBRATION_HOLD_MS = 900;
 const CELEBRATION_FADE_MS = 300;
@@ -191,8 +203,9 @@ export function BeeLineScreen() {
   // per React commit), and reading `collectionState` itself would risk re-processing the same tile
   // more than once before its collection is reflected in a re-render.
   const collectedIdsRef = useRef<Set<string>>(new Set());
+  // The current drag's steering state (finger-relative head movement plus the lead ahead of it).
+  const steeringRef = useRef<SteeringState | null>(null);
 
-  const { profile } = useProfileStore();
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const words = useMemo(() => selectedList?.words ?? [], [selectedList]);
   const gameMode = useGameModeStore((state) => state.mode);
@@ -229,6 +242,31 @@ export function BeeLineScreen() {
 
   const mamaBear = useCharacterAnimationState();
   const villain = useCharacterAnimationState();
+
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const compact = screenHeight <= COMPACT_HEIGHT_PX;
+
+  // Everything about tile size and spacing comes from the measured field and the word, so a long
+  // word on a small phone gets smaller tiles (never the gaps) and, as a last resort, fewer decoys.
+  const planFieldLayout = (word: string, bounds: Bounds) =>
+    getBeeLineTileLayout(bounds, word.length, modeConfig.decoyLetterCount);
+  const buildFieldFor = (word: string, bounds: Bounds) => {
+    const layout = planFieldLayout(word, bounds);
+    return buildBeeLineField(word, layout.decoyCount, bounds, {
+      tileSize: layout.tileSize,
+      minTileSpacingPx: layout.minCenterSpacingPx,
+    });
+  };
+  const tileLayout = fieldBounds && currentWord ? planFieldLayout(currentWord, fieldBounds) : null;
+  const tileSize = tileLayout?.tileSize ?? FALLBACK_TILE_SIZE_PX;
+  const trailSpacingPx = tileSize * TRAIL_SPACING_FACTOR;
+  // Width left for the word-so-far tiles once the connector dots (easy mode) are accounted for.
+  const wordTileSize = getAnswerTileSize(screenWidth - theme.spacing.md * 2 - (currentWord?.length ?? 0) * 6, currentWord?.length ?? 0);
+  const tileBox = { width: tileSize, height: tileSize };
+  // Absolutely positioned children are placed from the field's inner (padding) edge, inside its border.
+  const fieldOriginX = (fieldBounds?.x ?? 0) + FIELD_BORDER_PX;
+  const fieldOriginY = (fieldBounds?.y ?? 0) + FIELD_BORDER_PX;
 
   const revealWord = (word: string) => {
     if (bannerTimeoutRef.current) {
@@ -413,7 +451,7 @@ export function BeeLineScreen() {
       setFireworkSnapshot({
         headPosition: preTimeoutHeadPosition,
         headLetter: word[0] ?? '',
-        trailPositions: resolveTrailSegmentPositions(headPathRef.current, preTimeoutTrailLetters.length, TRAIL_SEGMENT_SPACING_PX),
+        trailPositions: resolveTrailSegmentPositions(headPathRef.current, preTimeoutTrailLetters.length, trailSpacingPx),
         trailLetters: preTimeoutTrailLetters,
       });
     }
@@ -436,7 +474,7 @@ export function BeeLineScreen() {
       // attempt, so it rebuilds the field exactly like the chainBroke branch's impossible-only
       // rebuild does, just unconditionally here since this path is impossible-only by construction
       // (modeConfig.timer is only ever defined at impossible).
-      const nextField = buildBeeLineField(word, modeConfig.decoyLetterCount, fieldBounds!);
+      const nextField = buildFieldFor(word, fieldBounds!);
       setField(nextField);
       setCollectionState(createCollectionState(word));
       collectedIdsRef.current = new Set();
@@ -566,7 +604,7 @@ export function BeeLineScreen() {
         setScatterSnapshot({
           headPosition: preBreakHeadPosition,
           headLetter: currentWord[0] ?? '',
-          trailPositions: resolveTrailSegmentPositions(headPathRef.current, preBreakTrailLetters.length, TRAIL_SEGMENT_SPACING_PX),
+          trailPositions: resolveTrailSegmentPositions(headPathRef.current, preBreakTrailLetters.length, trailSpacingPx),
           trailLetters: preBreakTrailLetters,
         });
       }
@@ -586,7 +624,7 @@ export function BeeLineScreen() {
       // the unchanged `field` is sufficient to make every tile reappear at its original spot.
       resolvingRef.current = true;
       const nextField = modeConfig.randomizePositionsPerAttempt
-        ? buildBeeLineField(field.word, modeConfig.decoyLetterCount, fieldBounds!)
+        ? buildFieldFor(field.word, fieldBounds!)
         : field;
       setTimeout(() => {
         setField(nextField);
@@ -626,15 +664,9 @@ export function BeeLineScreen() {
       return;
     }
 
-    for (const tile of field.tiles) {
-      if (collectedIdsRef.current.has(tile.id)) {
-        continue;
-      }
-      const distance = Math.hypot(point.x - tile.position.x, point.y - tile.position.y);
-      if (distance <= HEAD_PICKUP_RADIUS_PX) {
-        attemptPickup(tile);
-        return;
-      }
+    const touched = findTouchedTile(point, field.tiles, collectedIdsRef.current, collectedIdsRef.current.size, tileSize);
+    if (touched) {
+      attemptPickup(touched);
     }
   };
 
@@ -651,9 +683,13 @@ export function BeeLineScreen() {
       return;
     }
 
+    const finger = toContainerRelative({ x: absoluteX, y: absoluteY }, containerBounds);
+
     if (collectedIdsRef.current.size > 0) {
       // Resuming control of an already-collected head after a lift-and-regrab — the recorded path
       // and trail stay exactly where they were; onUpdate just keeps extending them from here.
+      const resumeFrom = headPosition ?? headFieldTile?.position;
+      steeringRef.current = resumeFrom ? beginSteering(resumeFrom, finger) : null;
       return;
     }
 
@@ -662,9 +698,11 @@ export function BeeLineScreen() {
       return;
     }
 
-    const point = toContainerRelative({ x: absoluteX, y: absoluteY }, containerBounds);
-    headPathRef.current = [point];
-    setHeadPosition(point);
+    // The head is born where its tile sits; from here it moves with the finger's movement (plus a
+    // lead ahead of it), so the finger never has to cover the bee and the head never jumps.
+    headPathRef.current = [tile.position];
+    steeringRef.current = beginSteering(tile.position, finger);
+    setHeadPosition(tile.position);
   };
 
   /** Fires on every drag frame once a head exists (a no-op beforehand, for a mistaken touch that
@@ -672,17 +710,31 @@ export function BeeLineScreen() {
    *  pickup — this is what makes pickup continuous during the drag rather than a discrete
    *  drop-target check. */
   const handleHeadPanUpdate = (absoluteX: number, absoluteY: number) => {
-    if (resolvingRef.current || collectedIdsRef.current.size === 0) {
+    const steering = steeringRef.current;
+    if (resolvingRef.current || collectedIdsRef.current.size === 0 || !steering || !fieldBounds) {
       return;
     }
 
-    const point = toContainerRelative({ x: absoluteX, y: absoluteY }, containerBounds);
-    headPathRef.current = appendTrailPathPoint(headPathRef.current, point, {
+    const finger = toContainerRelative({ x: absoluteX, y: absoluteY }, containerBounds);
+    const margin = tileSize / 2 + BEE_LINE_FIELD_EDGE_PAD_PX;
+    const step = stepSteering(steering, finger, {
+      leadPx: tileSize * HEAD_LEAD_FACTOR,
+      rampPx: STEERING_RAMP_PX,
+      bounds: {
+        minX: fieldBounds.x + margin,
+        maxX: fieldBounds.x + fieldBounds.width - margin,
+        minY: fieldBounds.y + margin,
+        maxY: fieldBounds.y + fieldBounds.height - margin,
+      },
+    });
+    steeringRef.current = step.state;
+
+    headPathRef.current = appendTrailPathPoint(headPathRef.current, step.head, {
       minSpacingPx: TRAIL_PATH_MIN_POINT_SPACING_PX,
       maxLength: TRAIL_PATH_MAX_POINTS,
     });
-    setHeadPosition(point);
-    checkHeadProximityPickup(point);
+    setHeadPosition(step.head);
+    checkHeadProximityPickup(step.head);
   };
 
   useEffect(() => {
@@ -739,7 +791,7 @@ export function BeeLineScreen() {
     if (!currentWord || !fieldBounds) {
       return;
     }
-    setField(buildBeeLineField(currentWord, modeConfig.decoyLetterCount, fieldBounds));
+    setField(buildFieldFor(currentWord, fieldBounds));
     // Builds the field for a word's FIRST attempt (or once fieldBounds first becomes available) —
     // every tier reuses this same call, satisfying "once per word" at easy/hard/crazy outright.
     // impossible's "once per ATTEMPT" requirement (architecture 26.4) is satisfied by a second call
@@ -757,7 +809,13 @@ export function BeeLineScreen() {
       return;
     }
     fieldRef.current?.measureInWindow((x, y, width, height) => {
-      setFieldBounds({ x: x - containerBounds.x, y: y - containerBounds.y, width, height });
+      const next = { x: x - containerBounds.x, y: y - containerBounds.y, width, height };
+      // Rebuilding the field restarts the attempt, so only publish bounds that really changed.
+      setFieldBounds((prev) =>
+        prev && prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height
+          ? prev
+          : next,
+      );
     });
   };
 
@@ -792,10 +850,10 @@ export function BeeLineScreen() {
     ? remainingTiles.filter((tile) => tile.id !== headFieldTile.id)
     : remainingTiles;
   const trailLetters = collectedPrefix.slice(1);
-  const trailPositions = resolveTrailSegmentPositions(headPathRef.current, trailLetters.length, TRAIL_SEGMENT_SPACING_PX);
+  const trailPositions = resolveTrailSegmentPositions(headPathRef.current, trailLetters.length, trailSpacingPx);
   const headRenderPosition: Point | null = headPosition ?? headFieldTile?.position ?? null;
-  const headLeft = headRenderPosition ? headRenderPosition.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2 : 0;
-  const headTop = headRenderPosition ? headRenderPosition.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2 : 0;
+  const headLeft = headRenderPosition ? headRenderPosition.x - fieldOriginX - tileSize / 2 : 0;
+  const headTop = headRenderPosition ? headRenderPosition.y - fieldOriginY - tileSize / 2 : 0;
   const headPan = headFieldTile
     ? Gesture.Pan()
         .runOnJS(true)
@@ -806,7 +864,9 @@ export function BeeLineScreen() {
   // Wrong-order's tile wobble: a rotate oscillation applied only to the mis-tapped tile's wrapper.
   const wobbleRotate = wobbleAnim.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-9deg', '0deg', '9deg'] });
   const mistakeTileStyle = (tileId: string) =>
-    tileId === mistakeTileId ? [styles.mistakeOutline, { transform: [{ rotate: wobbleRotate }] }] : null;
+    tileId === mistakeTileId
+      ? [styles.mistakeOutline, { borderRadius: tileSize / 2, transform: [{ rotate: wobbleRotate }] }]
+      : null;
 
   // Wrong-letter's "sproing/poof" scatter burst: shared scale/rotate/fade applied to every element
   // of `scatterSnapshot`'s overlay.
@@ -835,49 +895,41 @@ export function BeeLineScreen() {
   return (
     <View
       ref={containerRef}
-      style={styles.container}
+      style={[
+        styles.container,
+        { paddingTop: insets.top + theme.spacing.xs, paddingBottom: insets.bottom + theme.spacing.xs },
+      ]}
       onLayout={() => {
         containerRef.current?.measureInWindow((x, y, width, height) => {
           setContainerBounds({ x, y, width, height });
         });
       }}
     >
-      <Pressable testID="back-button" style={styles.backButton} onPress={handleGoHome}>
-        <Text style={styles.backButtonText}>← Back</Text>
-      </Pressable>
-
-      <Text style={styles.title}>Bee Line</Text>
-      <Text style={styles.greeting}>
-        {profile ? `Hi ${profile.name}! Follow the bee and collect the letters.` : 'Follow the bee and collect the letters.'}
-      </Text>
-      {selectedList ? <Text style={styles.listName}>List: {selectedList.name}</Text> : null}
-      <Text style={styles.modeLine}>Mode: {GAME_MODE_CONFIG[gameMode].label}</Text>
-
-      {words.length > 0 ? (
-        <View style={styles.characterRow}>
-          <Character characterId="mama-bear" size="medium" animationState={mamaBear.animationState} />
-          {villainPresent && villainId ? (
-            <Character characterId={villainId} size="small" animationState={villain.animationState} />
-          ) : null}
-        </View>
-      ) : null}
-
-      {words.length === 0 ? (
-        <View style={styles.emptyListCard}>
-          <Text style={styles.emptyListText}>This list doesn't have any words yet.</Text>
-          <Pressable style={styles.secondaryButton} onPress={() => router.replace('/lists')}>
-            <Text style={styles.secondaryButtonText}>Add words or pick another list</Text>
+      <View style={styles.topBar}>
+        <Pressable
+          testID="back-button"
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          style={styles.topBarButton}
+          onPress={handleGoHome}
+        >
+          <Text style={styles.topBarButtonText}>← Back</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Word Lists"
+          style={styles.topBarButton}
+          onPress={() => router.replace('/lists')}
+        >
+          <Text style={styles.topBarButtonText}>📚</Text>
+        </Pressable>
+        {!compact ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Exit" style={styles.exitButton} onPress={handleExitApp}>
+            <Text style={styles.exitButtonText}>Exit</Text>
           </Pressable>
-        </View>
-      ) : (
-        <>
-          <View style={styles.targetCard}>
-            <Text style={styles.targetLabel}>Listen and collect it!</Text>
-            <Pressable testID="megaphone-button" onPress={handleMegaphonePress}>
-              <Text style={styles.targetPrompt}>🎯 🐝</Text>
-            </Pressable>
-          </View>
-
+        ) : null}
+        <View style={styles.topBarSpacer} />
+        {words.length > 0 ? (
           <View style={styles.scoreRow}>
             <Text testID="bee-line-score" style={styles.scoreText}>Score: {scoreState.running}</Text>
             {scorePopup ? (
@@ -898,38 +950,77 @@ export function BeeLineScreen() {
               </Animated.Text>
             ) : null}
           </View>
+        ) : null}
+      </View>
 
-          <View style={styles.wordSoFarRow}>
+      <Text testID="info-line" style={styles.infoLine} numberOfLines={1}>
+        Bee Line · {GAME_MODE_CONFIG[gameMode].label}
+        {selectedList ? ` · ${selectedList.name}` : ''}
+      </Text>
+
+      {words.length === 0 ? (
+        <View style={styles.emptyListCard}>
+          <Text style={styles.emptyListText}>This list doesn't have any words yet.</Text>
+          <Pressable style={styles.secondaryButton} onPress={() => router.replace('/lists')}>
+            <Text style={styles.secondaryButtonText}>Add words or pick another list</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <>
+          <View testID="prompt-row" style={styles.headerRow}>
+            <Character characterId="mama-bear" size={compact ? 44 : 72} animationState={mamaBear.animationState} />
+            <Pressable
+              testID="megaphone-button"
+              accessibilityRole="button"
+              accessibilityLabel="Say the word"
+              style={styles.promptPill}
+              onPress={handleMegaphonePress}
+            >
+              <Text style={styles.targetLabel}>Listen and collect it!</Text>
+              <Text style={styles.targetPrompt}>🎯 🐝</Text>
+            </Pressable>
+            {villainPresent && villainId ? (
+              <Character characterId={villainId} size={compact ? 44 : 72} animationState={villain.animationState} />
+            ) : (
+              <View style={{ width: compact ? 44 : 72 }} />
+            )}
+          </View>
+
+          <View testID="word-so-far" style={styles.wordSoFarRow}>
             {collectedPrefix.split('').map((letter, index) => (
               <React.Fragment key={`${letter}-${index}`}>
-                {index > 0 ? <Text style={styles.wordSoFarConnector}>{modeConfig.showTowedTrail ? '' : '·'}</Text> : null}
-                <View style={styles.wordSoFarTile}>
-                  <Text style={styles.wordSoFarTileText}>{letter.toUpperCase()}</Text>
+                {index > 0 && !modeConfig.showTowedTrail ? <Text style={styles.wordSoFarConnector}>·</Text> : null}
+                <View style={[styles.wordSoFarTile, { width: wordTileSize, height: wordTileSize }]}>
+                  <Text style={[styles.wordSoFarTileText, { fontSize: Math.round(wordTileSize * 0.45) }]}>
+                    {letter.toUpperCase()}
+                  </Text>
                 </View>
               </React.Fragment>
             ))}
             {currentWord && collectedPrefix.length < currentWord.length ? (
-              <View style={styles.wordSoFarSlot}>
-                <Text style={styles.wordSoFarSlotText}>?</Text>
+              <View style={[styles.wordSoFarSlot, { width: wordTileSize, height: wordTileSize }]}>
+                <Text style={[styles.wordSoFarSlotText, { fontSize: Math.round(wordTileSize * 0.45) }]}>?</Text>
               </View>
             ) : null}
           </View>
 
-          <View ref={fieldRef} style={styles.field} onLayout={measureField}>
+          <View ref={fieldRef} testID="bee-line-field" style={styles.field} onLayout={measureField}>
             {modeConfig.input === 'tap'
               ? remainingTiles.map((tile) => {
-                  const left = tile.position.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2;
-                  const top = tile.position.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2;
+                  // The tap target is never smaller than 44pt even if the drawn tile is.
+                  const tapSize = tileLayout?.tapTargetPx ?? tileSize;
+                  const left = tile.position.x - fieldOriginX - tapSize / 2;
+                  const top = tile.position.y - fieldOriginY - tapSize / 2;
 
                   return (
                     <Pressable
                       key={tile.id}
                       testID={`bee-line-tile-${tile.id}`}
-                      style={[styles.tileWrapper, { left, top }]}
+                      style={[styles.tileWrapper, styles.tapTarget, { left, top, width: tapSize, height: tapSize }]}
                       onPress={() => handleTilePress(tile)}
                     >
                       <Animated.View style={mistakeTileStyle(tile.id)}>
-                        <HexTile letter={tile.letter} size={TILE_SIZE} />
+                        <HexTile testID={`bee-line-hex-${tile.id}`} letter={tile.letter} size={tileSize} />
                       </Animated.View>
                     </Pressable>
                   );
@@ -941,15 +1032,15 @@ export function BeeLineScreen() {
                       head exists, every one of these is a passive, collision-only obstacle the
                       head can pick up or mistake-trigger on contact. */}
                   {dragRemainingTiles.map((tile) => {
-                    const left = tile.position.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2;
-                    const top = tile.position.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2;
+                    const left = tile.position.x - fieldOriginX - tileSize / 2;
+                    const top = tile.position.y - fieldOriginY - tileSize / 2;
                     const isDraggable = collectionState?.collected.length === 0 && tile.kind === 'correct';
 
                     if (!isDraggable) {
                       return (
-                        <View key={tile.id} testID={`bee-line-tile-${tile.id}`} style={[styles.tileWrapper, { left, top }]}>
+                        <View key={tile.id} testID={`bee-line-tile-${tile.id}`} style={[styles.tileWrapper, tileBox, { left, top }]}>
                           <Animated.View style={mistakeTileStyle(tile.id)}>
-                            <HexTile letter={tile.letter} size={TILE_SIZE} />
+                            <HexTile testID={`bee-line-hex-${tile.id}`} letter={tile.letter} size={tileSize} />
                           </Animated.View>
                         </View>
                       );
@@ -962,9 +1053,9 @@ export function BeeLineScreen() {
 
                     return (
                       <GestureDetector key={tile.id} gesture={pan}>
-                        <View testID={`bee-line-tile-${tile.id}`} style={[styles.tileWrapper, { left, top }]}>
+                        <View testID={`bee-line-tile-${tile.id}`} style={[styles.tileWrapper, tileBox, { left, top }]}>
                           <Animated.View style={mistakeTileStyle(tile.id)}>
-                            <HexTile letter={tile.letter} size={TILE_SIZE} />
+                            <HexTile testID={`bee-line-hex-${tile.id}`} letter={tile.letter} size={tileSize} />
                           </Animated.View>
                         </View>
                       </GestureDetector>
@@ -975,16 +1066,16 @@ export function BeeLineScreen() {
                       along the head's recorded path, farthest-from-head first so nearer segments
                       stack visually on top where positions overlap. */}
                   {trailPositions.map((position, index) => {
-                    const left = position.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2;
-                    const top = position.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2;
+                    const left = position.x - fieldOriginX - tileSize / 2;
+                    const top = position.y - fieldOriginY - tileSize / 2;
 
                     return (
                       <View
                         key={`bee-line-trail-${index}`}
                         pointerEvents="none"
-                        style={[styles.tileWrapper, { left, top, zIndex: 5 + (trailPositions.length - index) }]}
+                        style={[styles.tileWrapper, tileBox, { left, top, zIndex: 5 + (trailPositions.length - index) }]}
                       >
-                        <HexTile letter={trailLetters[index]} size={TILE_SIZE} backgroundColor={theme.colors.gold} />
+                        <HexTile letter={trailLetters[index]} size={tileSize} backgroundColor={theme.colors.gold} />
                       </View>
                     );
                   })}
@@ -999,10 +1090,10 @@ export function BeeLineScreen() {
                     <GestureDetector gesture={headPan}>
                       <View
                         testID="bee-line-head"
-                        style={[styles.tileWrapper, styles.headWrapper, { left: headLeft, top: headTop }]}
+                        style={[styles.tileWrapper, tileBox, styles.headWrapper, { left: headLeft, top: headTop }]}
                       >
                         <Text style={styles.beeRider} pointerEvents="none">🐝</Text>
-                        <HexTile letter={headFieldTile.letter} size={TILE_SIZE} />
+                        <HexTile testID={`bee-line-hex-${headFieldTile.id}`} letter={headFieldTile.letter} size={tileSize} />
                       </View>
                     </GestureDetector>
                   ) : null}
@@ -1018,8 +1109,8 @@ export function BeeLineScreen() {
                       style={[
                         styles.fuseWrapper,
                         {
-                          left: headRenderPosition.x - (fieldBounds?.x ?? 0) - FUSE_BAR_WIDTH_PX / 2,
-                          top: headRenderPosition.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2 - 34,
+                          left: headRenderPosition.x - fieldOriginX - FUSE_BAR_WIDTH_PX / 2,
+                          top: headRenderPosition.y - fieldOriginY - tileSize / 2 - 34,
                         },
                       ]}
                     >
@@ -1052,8 +1143,8 @@ export function BeeLineScreen() {
                   {scatterSnapshot ? (
                     <View pointerEvents="none">
                       {scatterSnapshot.trailPositions.map((position, index) => {
-                        const trailLeft = position.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2;
-                        const trailTop = position.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2;
+                        const trailLeft = position.x - fieldOriginX - tileSize / 2;
+                        const trailTop = position.y - fieldOriginY - tileSize / 2;
                         const flingSign = index % 2 === 0 ? 1 : -1;
 
                         return (
@@ -1061,6 +1152,7 @@ export function BeeLineScreen() {
                             key={`scatter-trail-${index}`}
                             style={[
                               styles.tileWrapper,
+                              tileBox,
                               {
                                 left: trailLeft,
                                 top: trailTop,
@@ -1082,7 +1174,7 @@ export function BeeLineScreen() {
                               },
                             ]}
                           >
-                            <HexTile letter={scatterSnapshot.trailLetters[index]} size={TILE_SIZE} backgroundColor={theme.colors.gold} />
+                            <HexTile letter={scatterSnapshot.trailLetters[index]} size={tileSize} backgroundColor={theme.colors.gold} />
                           </Animated.View>
                         );
                       })}
@@ -1090,10 +1182,11 @@ export function BeeLineScreen() {
                       <Animated.View
                         style={[
                           styles.tileWrapper,
+                          tileBox,
                           styles.headWrapper,
                           {
-                            left: scatterSnapshot.headPosition.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2,
-                            top: scatterSnapshot.headPosition.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2,
+                            left: scatterSnapshot.headPosition.x - fieldOriginX - tileSize / 2,
+                            top: scatterSnapshot.headPosition.y - fieldOriginY - tileSize / 2,
                             opacity: scatterOpacity,
                             transform: [{ scale: scatterScale }, { rotate: scatterRotate }],
                           },
@@ -1102,7 +1195,7 @@ export function BeeLineScreen() {
                         <Animated.Text style={[styles.beeRider, { transform: [{ rotate: beeHeadshakeRotate }] }]}>
                           🐝
                         </Animated.Text>
-                        <HexTile letter={scatterSnapshot.headLetter} size={TILE_SIZE} />
+                        <HexTile letter={scatterSnapshot.headLetter} size={tileSize} />
                       </Animated.View>
                     </View>
                   ) : null}
@@ -1116,14 +1209,15 @@ export function BeeLineScreen() {
                   {fireworkSnapshot ? (
                     <View pointerEvents="none">
                       {fireworkSnapshot.trailPositions.map((position, index) => {
-                        const trailLeft = position.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2;
-                        const trailTop = position.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2;
+                        const trailLeft = position.x - fieldOriginX - tileSize / 2;
+                        const trailTop = position.y - fieldOriginY - tileSize / 2;
 
                         return (
                           <Animated.View
                             key={`firework-trail-${index}`}
                             style={[
                               styles.tileWrapper,
+                              tileBox,
                               {
                                 left: trailLeft,
                                 top: trailTop,
@@ -1133,7 +1227,7 @@ export function BeeLineScreen() {
                               },
                             ]}
                           >
-                            <HexTile letter={fireworkSnapshot.trailLetters[index]} size={TILE_SIZE} backgroundColor={theme.colors.gold} />
+                            <HexTile letter={fireworkSnapshot.trailLetters[index]} size={tileSize} backgroundColor={theme.colors.gold} />
                           </Animated.View>
                         );
                       })}
@@ -1141,17 +1235,18 @@ export function BeeLineScreen() {
                       <Animated.View
                         style={[
                           styles.tileWrapper,
+                          tileBox,
                           styles.headWrapper,
                           {
-                            left: fireworkSnapshot.headPosition.x - (fieldBounds?.x ?? 0) - TILE_SIZE / 2,
-                            top: fireworkSnapshot.headPosition.y - (fieldBounds?.y ?? 0) - TILE_SIZE / 2,
+                            left: fireworkSnapshot.headPosition.x - fieldOriginX - tileSize / 2,
+                            top: fireworkSnapshot.headPosition.y - fieldOriginY - tileSize / 2,
                             opacity: fireworkTileOpacity,
                             transform: [{ scale: fireworkTileScale }],
                           },
                         ]}
                       >
                         <Text style={styles.beeRider}>🐝</Text>
-                        <HexTile letter={fireworkSnapshot.headLetter} size={TILE_SIZE} />
+                        <HexTile letter={fireworkSnapshot.headLetter} size={tileSize} />
                       </Animated.View>
 
                       {/* The particle burst itself — a fan of gold/hot-pink dots launched upward
@@ -1159,8 +1254,8 @@ export function BeeLineScreen() {
                       <View
                         style={{
                           position: 'absolute',
-                          left: fireworkSnapshot.headPosition.x - (fieldBounds?.x ?? 0),
-                          top: fireworkSnapshot.headPosition.y - (fieldBounds?.y ?? 0),
+                          left: fireworkSnapshot.headPosition.x - fieldOriginX,
+                          top: fireworkSnapshot.headPosition.y - fieldOriginY,
                         }}
                       >
                         {FIREWORK_PARTICLES.map((particle, index) => (
@@ -1189,6 +1284,7 @@ export function BeeLineScreen() {
 
           <Text
             testID="bee-line-feedback"
+            numberOfLines={1}
             style={[
               styles.feedback,
               feedback.includes('Not the') || feedback.includes("That's not")
@@ -1223,20 +1319,17 @@ export function BeeLineScreen() {
             style={[styles.bannerCard, { opacity: bannerOpacity, transform: [{ scale: bannerScale }] }]}
           >
             <Text style={styles.bannerFlourish}>🎉 ✨ 🐝 ✨ 🎉</Text>
-            <Text testID="target-word" style={styles.bannerWord}>{currentWord.toUpperCase()}</Text>
+            <Text
+              testID="target-word"
+              style={[styles.bannerWord, { fontSize: getBannerFontSize(screenWidth, currentWord.length) }]}
+            >
+              {currentWord.toUpperCase()}
+            </Text>
             <Text style={styles.bannerSubtext}>Listen closely and remember it!</Text>
           </Animated.View>
         </View>
       ) : null}
 
-      <View style={styles.actionsRow}>
-        <Pressable style={styles.secondaryButton} onPress={() => router.replace('/lists')}>
-          <Text style={styles.secondaryButtonText}>📚 Word Lists</Text>
-        </Pressable>
-        <Pressable style={styles.exitButton} onPress={handleExitApp}>
-          <Text style={styles.exitButtonText}>Exit</Text>
-        </Pressable>
-      </View>
     </View>
   );
 }
@@ -1244,41 +1337,8 @@ export function BeeLineScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    padding: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.md,
     backgroundColor: theme.colors.background,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: theme.colors.text,
-    textAlign: 'center',
-  },
-  greeting: {
-    marginTop: theme.spacing.sm,
-    color: theme.colors.muted,
-    textAlign: 'center',
-  },
-  listName: {
-    marginTop: 2,
-    color: theme.colors.muted,
-    textAlign: 'center',
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  modeLine: {
-    marginTop: 2,
-    color: theme.colors.muted,
-    textAlign: 'center',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  characterRow: {
-    marginTop: theme.spacing.sm,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    gap: theme.spacing.lg,
   },
   emptyListCard: {
     marginTop: theme.spacing.lg,
@@ -1297,31 +1357,71 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: theme.spacing.xs,
   },
-  targetCard: {
-    marginTop: theme.spacing.lg,
-    padding: theme.spacing.md,
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
+  topBarButton: {
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface,
+    borderWidth: 3,
+    borderColor: '#111111',
+  },
+  topBarButtonText: {
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  topBarSpacer: {
+    flex: 1,
+  },
+  infoLine: {
+    marginTop: 2,
+    color: theme.colors.muted,
+    textAlign: 'center',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  headerRow: {
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.spacing.xs,
+  },
+  promptPill: {
+    flex: 1,
+    minHeight: 44,
+    paddingVertical: 2,
+    paddingHorizontal: theme.spacing.sm,
     borderRadius: 20,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
-    borderWidth: 4,
+    justifyContent: 'center',
+    borderWidth: 3,
     borderColor: '#111111',
-    minHeight: 96,
+  },
+  tapTarget: {
+    alignItems: 'center',
     justifyContent: 'center',
   },
   targetLabel: {
-    fontSize: 13,
+    fontSize: 11,
     color: theme.colors.muted,
     textTransform: 'uppercase',
     letterSpacing: 1.2,
   },
   targetPrompt: {
-    marginTop: theme.spacing.xs,
-    fontSize: 32,
+    fontSize: 20,
   },
   scoreRow: {
-    marginTop: theme.spacing.sm,
-    alignSelf: 'center',
     position: 'relative',
+    marginRight: theme.spacing.md,
   },
   scoreText: {
     fontSize: 16,
@@ -1342,15 +1442,14 @@ const styles = StyleSheet.create({
   mistakeOutline: {
     borderWidth: 3,
     borderColor: '#FF8C00',
-    borderRadius: TILE_SIZE / 2,
   },
   wordSoFarRow: {
-    marginTop: theme.spacing.sm,
+    marginTop: 4,
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'center',
-    minHeight: 40,
+    gap: 3,
+    minHeight: 28,
   },
   wordSoFarConnector: {
     fontSize: 18,
@@ -1358,41 +1457,35 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
   },
   wordSoFarTile: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.colors.secondary,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#111111',
   },
   wordSoFarTileText: {
-    fontSize: 16,
     fontWeight: '700',
     color: theme.colors.surface,
   },
   wordSoFarSlot: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: theme.spacing.xs,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#D4A41C',
     backgroundColor: 'rgba(255,255,255,0.7)',
   },
   wordSoFarSlotText: {
-    fontSize: 16,
     color: theme.colors.muted,
   },
   field: {
-    marginTop: theme.spacing.sm,
+    flex: 1,
+    minHeight: 160,
+    marginTop: theme.spacing.xs,
     alignSelf: 'center',
     width: '100%',
-    maxWidth: 340,
-    aspectRatio: 1,
+    maxWidth: 720,
     borderRadius: 24,
     backgroundColor: '#F5D998',
     borderWidth: 4,
@@ -1401,8 +1494,6 @@ const styles = StyleSheet.create({
   },
   tileWrapper: {
     position: 'absolute',
-    width: TILE_SIZE,
-    height: TILE_SIZE,
   },
   headWrapper: {
     alignItems: 'center',
@@ -1463,9 +1554,9 @@ const styles = StyleSheet.create({
     borderColor: '#111111',
   },
   feedback: {
-    marginTop: theme.spacing.lg,
+    marginTop: theme.spacing.xs,
     textAlign: 'center',
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
   },
   feedbackSuccess: {
@@ -1513,22 +1604,6 @@ const styles = StyleSheet.create({
     color: theme.colors.surface,
     textAlign: 'center',
   },
-  backButton: {
-    position: 'absolute',
-    top: theme.spacing.lg,
-    left: theme.spacing.lg,
-    paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.sm,
-    borderRadius: 999,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 3,
-    borderColor: '#111111',
-    zIndex: 10,
-  },
-  backButtonText: {
-    fontWeight: '700',
-    color: theme.colors.text,
-  },
   bannerOverlay: {
     position: 'absolute',
     top: 0,
@@ -1546,9 +1621,9 @@ const styles = StyleSheet.create({
     borderWidth: 6,
     borderColor: '#111111',
     paddingVertical: theme.spacing.xl,
-    paddingHorizontal: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.md,
     alignItems: 'center',
-    maxWidth: '85%',
+    maxWidth: '92%',
     shadowColor: '#111111',
     shadowOffset: { width: 6, height: 6 },
     shadowOpacity: 1,
@@ -1572,13 +1647,6 @@ const styles = StyleSheet.create({
     color: theme.colors.surface,
     textAlign: 'center',
   },
-  actionsRow: {
-    marginTop: theme.spacing.lg,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: theme.spacing.sm,
-  },
   secondaryButton: {
     alignSelf: 'center',
     paddingVertical: theme.spacing.xs,
@@ -1593,10 +1661,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   exitButton: {
-    alignSelf: 'center',
-    paddingVertical: theme.spacing.xs,
+    minHeight: 44,
     paddingHorizontal: theme.spacing.sm,
     borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: theme.colors.accent,
     borderWidth: 3,
     borderColor: '#111111',

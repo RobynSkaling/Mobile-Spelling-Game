@@ -1613,6 +1613,50 @@ Make Bee Line (the snake-style game) comfortably playable: smaller letters, clea
 
 Nothing. **Same top priority as Epic 28**; the two can be built in parallel.
 
+#### Revised: Implemented
+
+Bee Line now sizes its tiles from the field, keeps a full tile-width of empty space between every pair, and gives the field most of the screen. What landed:
+
+- **Sizing and spacing rules are pure and tested** (`src/features/play/logic/bee-line-layout.ts`). `getBeeLineTileLayout(field, wordLength, decoyCount)` returns the tile size, the minimum gap, the easy-mode tap target and the number of decoys that fit. It picks the largest tile (phone cap 52px, tablet cap 64px, floor 40px) at which every letter fits with a gap equal to the tile width, so tiles shrink before gaps do. Constants for the pickup reach, bump reach, trail spacing and head lead live in the same file.
+- **Placement enforces the gap** (`bee-line.ts`, `buildBeeLineField`). The old rejection sampler only tried a number of times and then fell back to a crowded spot, so its spacing was a tendency, not a guarantee (and its spacing was only one tile-width centre to centre, meaning tiles nearly touched). It is replaced by a jittered lattice: each tile takes a random lattice cell and may drift only by half the spare room, which makes the minimum spacing a guarantee for every randomised layout. `DEFAULT_MIN_TILE_SPACING_PX` is gone; the default spacing is now two tile-widths centre to centre.
+- **If a word doesn't fit** the layout keeps the full gap and drops decoys (`decoyCount < requestedDecoyCount`). Only when the word's own letters can't fit at the 40px floor does the gap shrink, and then `gapCompromised` is true. Neither happens for any built-in word at 320x568 or 375x667 (see below).
+- **No accidental pickups.** `findTouchedTile` collects the next letter only when the head's centre is within 0.45 of a tile-width of its centre. Every other tile (wrong order and decoys) only bumps within 0.3 of a tile-width, smaller than the drawn tile (0.5), so grazing past one doesn't count. The old single radius was 0.75 of a tile.
+- **Head leads the finger.** `beginSteering`/`stepSteering` in `snake-trail.ts`: the head moves by the finger's movement (so grabbing it never makes it jump), leans up to one tile-width ahead in the direction of travel (ramped in over 24px of drag, smoothed), and stops at the field walls. The finger no longer covers the bee.
+- **Trail spacing scales** with the tile size (0.6 of a tile-width, as before in ratio).
+- **Easy mode** taps use a wrapper of at least 44pt around each drawn tile (the 40px tiles at 320 wide get 44pt targets; neighbours are at least 80px apart so targets never overlap).
+- **Screen re-layout** (`BeeLineScreen.tsx`). A compact header (Back, Word Lists, Score on one row; Mama Bear, the prompt/megaphone pill and the villain on the next; one info line; the word so far) leaves the field as the one flexible region. The fixed 340px square is gone. The word-so-far tiles shrink so a 13-letter word stays on one row, and the reveal banner's word scales to fit (same fix as Epic 28). Safe-area insets are applied. Exit shows only on tall screens.
+- **Layout smoke check extended** (`scripts/layout-smoke.mjs`, `npm run smoke:layout`). It now also checks Bee Line in every mode at all three sizes: nothing off-screen or overlapping, field at least 60% of the screen height, tiles at least 40px, at least one tile-width between every pair of drawn tiles, tiles inside the field, easy tap targets at least 44px, and it reports any decoys that had to be dropped.
+
+**A bug found on the way.** Tiles were positioned from the field's outer edge, but absolutely positioned children are placed from inside the field's 4px border, so every tile sat 4px too far right and down and the right-hand and bottom tiles were clipped. The screen now offsets by the border width.
+
+**Judgment calls:**
+
+- 0.45 / 0.3 / 1 tile-width for pickup, bump and lead are starting points for the child play test the epic's open questions already call for.
+- Easy mode uses the same spacing as the snake modes, as the epic recommended.
+- Square lattice rather than a hex lattice: slightly lower capacity, but simple jitter bounds that keep the gap provable.
+- The greeting, title, list and mode lines became one info line to give the field the height.
+
+**Verification:**
+
+- `npm test`: 188/188 (167 after Epic 28; 21 new across `bee-line-layout.test.ts` and `snake-trail.test.ts`, plus the old crowding test in `bee-line.test.ts` rewritten for the new gap rule). `npx tsc --noEmit` is clean. The web export builds. `npm run smoke:layout`: all cases pass for both games.
+- **Proven playable, in a test** (`bee-line-layout.test.ts`): for the longest built-in word ("questionnaire", 13 letters) in every mode at 320x568 and 375x667 field sizes, over 25 random layouts each, every pair of tiles has the full gap, every tile is inside the field, and a breadth-first search over the field finds a path for the head's centre from each correct letter to the next that never enters the bump zone of any wrong tile.
+- **Measured (web export, headless Chrome), "questionnaire":**
+
+  | Viewport | Field height | Tile (easy / hard / crazy / impossible) | Letters (13 / 13 / 16 / 18) |
+  |---|---|---|---|
+  | 320x568 | 371px (65%) | 40 / 40 / 40 / 40 px | no decoys dropped |
+  | 375x667 | 470px (70%) | 51 / 51 / 47 / 47 px | no decoys dropped |
+  | 768x1024 | 793px (77%) | 64 px in every mode | no decoys dropped |
+
+  In each case the measured edge-to-edge gap was at least one tile-width. At 320x568 the 18 impossible-mode letters use 18 of the 20 lattice cells, so that case is at the limit: any longer word, or more decoys, would drop decoys. Custom lists with words over 13 letters can hit that.
+- A scripted mouse drag at 375x667 in hard mode steered the head to collect C, A, T in order ("Perfect!"), with the head ahead of the finger. Easy-mode taps collected the word too. Screenshots at 320x568, 375x667 and 768x1024 were viewed.
+
+**Not met / still owed, stated plainly:**
+
+- **No real-device test was done.** The epic's "real-device play check" is still owed by the product owner: please check on a phone that a 5-year-old's finger can steer to a 40px tile, that the lead distance feels right, and that the wrong-letter bump zone feels forgiving enough.
+- Scatter, timeout-firework, villain and score-popup visuals were adapted to the new tile size but not re-played by hand end to end. The bee emoji above the head can be clipped by the field's top edge when the head is on the top row.
+- Crazy! and Impossible!! at 320x568 sit on the 40px minimum tile with 80px centre spacing; if play testing finds that too tight, the fallback in the epic (fewer decoys on small phones) is one config change.
+
 ---
 
 ### Epic 30 — Parent Account and Multiple Child Profiles

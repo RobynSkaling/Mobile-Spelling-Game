@@ -99,3 +99,64 @@ export function appendTrailPathPoint(path: Point[], point: Point, options: Appen
   const next = [...path, point];
   return next.length > options.maxLength ? next.slice(next.length - options.maxLength) : next;
 }
+
+// ---------------------------------------------------------------------------
+// Head steering (Epic 29): the head leads slightly ahead of the finger so the finger never hides it
+// ---------------------------------------------------------------------------
+
+export type SteeringState = {
+  /** Where the head would be with no lead: it moves by exactly the finger's movement, so grabbing
+   *  the head never makes it jump, and it stops at the field walls instead of being dragged past. */
+  base: Point;
+  lastFinger: Point;
+  travelledPx: number;
+  /** Smoothed offset from `base` towards the direction of travel. */
+  lead: Point;
+};
+
+export type SteeringOptions = {
+  /** Largest distance the head is drawn ahead of the finger. */
+  leadPx: number;
+  /** The lead grows from zero over this much finger travel, so a fresh grab doesn't snap ahead. */
+  rampPx: number;
+  /** Area (same coordinate space as the head) the head's centre must stay inside. */
+  bounds: { minX: number; maxX: number; minY: number; maxY: number };
+  /** 0..1 share of the remaining gap to the target lead closed per update. */
+  smoothing?: number;
+};
+
+const clampPoint = (point: Point, bounds: SteeringOptions['bounds']): Point => ({
+  x: Math.min(Math.max(point.x, bounds.minX), bounds.maxX),
+  y: Math.min(Math.max(point.y, bounds.minY), bounds.maxY),
+});
+
+export function beginSteering(head: Point, finger: Point): SteeringState {
+  return { base: head, lastFinger: finger, travelledPx: 0, lead: { x: 0, y: 0 } };
+}
+
+/** Pure per-frame step: moves the head with the finger, leans it ahead in the direction of travel,
+ *  and keeps it inside `bounds`. Returns the new state and the head's centre. */
+export function stepSteering(
+  state: SteeringState,
+  finger: Point,
+  options: SteeringOptions,
+): { state: SteeringState; head: Point } {
+  const dx = finger.x - state.lastFinger.x;
+  const dy = finger.y - state.lastFinger.y;
+  const moved = Math.hypot(dx, dy);
+  const smoothing = options.smoothing ?? 0.3;
+
+  const base = clampPoint({ x: state.base.x + dx, y: state.base.y + dy }, options.bounds);
+  const travelledPx = state.travelledPx + moved;
+
+  let lead = state.lead;
+  if (moved >= 1) {
+    const ramp = Math.min(1, travelledPx / Math.max(options.rampPx, 1));
+    const targetX = (dx / moved) * options.leadPx * ramp;
+    const targetY = (dy / moved) * options.leadPx * ramp;
+    lead = { x: lead.x + (targetX - lead.x) * smoothing, y: lead.y + (targetY - lead.y) * smoothing };
+  }
+
+  const head = clampPoint({ x: base.x + lead.x, y: base.y + lead.y }, options.bounds);
+  return { state: { base, lastFinger: finger, travelledPx, lead }, head };
+}

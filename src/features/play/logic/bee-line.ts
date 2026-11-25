@@ -1,4 +1,10 @@
 import { GameMode } from './game-modes';
+import {
+  BEE_LINE_FIELD_EDGE_PAD_PX,
+  BEE_LINE_GAP_FACTOR,
+  BUMP_RADIUS_FACTOR,
+  PICKUP_RADIUS_FACTOR,
+} from './bee-line-layout';
 import { Bounds, DECOY_LETTER_POOL, Point, shuffleLetters } from './honey-pot-flick';
 
 /**
@@ -92,11 +98,8 @@ export const BEE_LINE_MODE_CONFIG: Record<GameMode, BeeLineModeConfig> = {
     showTowedTrail: true,
     // Epic 21 launch placeholder — NOT ratified by product/UX (roadmap Epic 21's own open
     // question). Deliberately lower than game-modes.ts's GAME_MODE_CONFIG.crazy.decoyLetterCount
-    // (6): Bee Line's field is a smaller ~340x340px square (BeeLineScreen.tsx's styles.field) than
-    // Honey Pot Flick's pot-catching field, and DEFAULT_MIN_TILE_SPACING_PX (64px) between every
-    // tile pair (correct + decoy) leaves less room before buildBeeLineField's rejection-sampler
-    // starts falling back to crowded placements. Mirrors HPF's tier-escalation shape without
-    // copying its exact numbers, per the roadmap's explicit "not required to match" note.
+    // (6). Since Epic 29 the screen plans the field with getBeeLineTileLayout, which drops decoys
+    // (never the gaps) if a long word plus these decoys can't fit on a small phone.
     decoyLetterCount: 3,
     randomizePositionsPerAttempt: false,
   },
@@ -153,69 +156,97 @@ export type BeeLineField = {
   tiles: ScatteredLetter[];
 };
 
-/** Default minimum center-to-center spacing (px) enforced between any two tiles on the field. */
-export const DEFAULT_MIN_TILE_SPACING_PX = 64;
-
-const MAX_PLACEMENT_ATTEMPTS = 200;
-
-function randomFieldPosition(field: Bounds, tileSize: number, random: () => number): Point {
-  const margin = tileSize / 2 + 4;
-  const minX = field.x + margin;
-  const maxX = field.x + Math.max(field.width - margin * 2, 0);
-  const minY = field.y + margin;
-  const maxY = field.y + Math.max(field.height - margin * 2, 0);
-
-  return {
-    x: minX + random() * Math.max(maxX - minX, 0),
-    y: minY + random() * Math.max(maxY - minY, 0),
-  };
-}
-
-function isFarEnoughFromPlaced(candidate: Point, placed: Point[], minSpacingPx: number): boolean {
-  return placed.every((point) => Math.hypot(point.x - candidate.x, point.y - candidate.y) >= minSpacingPx);
-}
-
-/**
- * Rejection-samples a position for one tile: tries random field positions (up to
- * `MAX_PLACEMENT_ATTEMPTS`) until one clears `minSpacingPx` from every already-placed tile.
- * Falls back to the last attempted position if the field is too crowded to satisfy the spacing
- * within the attempt budget, rather than looping forever or throwing.
- */
-function placeTile(
-  field: Bounds,
-  tileSize: number,
-  minSpacingPx: number,
-  placed: Point[],
-  random: () => number,
-): Point {
-  let candidate = randomFieldPosition(field, tileSize, random);
-
-  for (
-    let attempt = 0;
-    attempt < MAX_PLACEMENT_ATTEMPTS && !isFarEnoughFromPlaced(candidate, placed, minSpacingPx);
-    attempt += 1
-  ) {
-    candidate = randomFieldPosition(field, tileSize, random);
-  }
-
-  return candidate;
-}
+/** Tile size used when a caller doesn't pass one (e.g. tests); the screen always passes the size
+ *  `getBeeLineTileLayout` worked out for its real field. */
+export const DEFAULT_TILE_SIZE_PX = 48;
 
 export type BuildBeeLineFieldOptions = {
   /** Visual tile size (px), used to keep tiles fully within `field`'s bounds. Defaults to
-   *  `DEFAULT_MIN_TILE_SPACING_PX`. */
+   *  `DEFAULT_TILE_SIZE_PX`. */
   tileSize?: number;
   /** Minimum center-to-center spacing (px) enforced between any two tiles, so decoys never
-   *  literally overlap or hide a correct tile (UX Step 16). Defaults to `tileSize`. */
+   *  literally overlap or hide a correct tile (UX Step 16). Defaults to one tile plus one full
+   *  tile-width of empty space edge to edge (Epic 29). */
   minTileSpacingPx?: number;
   /** Injectable RNG for deterministic tests, mirroring villain-pool.ts's `pickNextVillain`. */
   random?: () => number;
 };
 
+type Lattice = { columns: number; rows: number; stepX: number; stepY: number };
+
+/** The lattice (columns x rows >= `count`) that spreads across the whole range, picking the column
+ *  count that keeps neighbours furthest apart. A single column/row has no step on that axis, so it
+ *  contributes no spacing limit there. */
+function fitLattice(rangeX: number, rangeY: number, count: number): Lattice {
+  let best: Lattice | null = null;
+  let bestSpacing = -1;
+
+  for (let columns = 1; columns <= Math.max(count, 1); columns += 1) {
+    const rows = Math.ceil(Math.max(count, 1) / columns);
+    const stepX = columns > 1 ? rangeX / (columns - 1) : Infinity;
+    const stepY = rows > 1 ? rangeY / (rows - 1) : Infinity;
+    const spacing = Math.min(stepX, stepY);
+
+    if (spacing > bestSpacing) {
+      bestSpacing = spacing;
+      best = { columns, rows, stepX, stepY };
+    }
+  }
+
+  return best as Lattice;
+}
+
+/**
+ * Places `count` tile centres inside `field` so that every pair is at least `minSpacingPx` apart.
+ * Tiles are scattered over a lattice with random jitter: each tile takes a random lattice cell and
+ * may wander off its cell centre by at most half of the spare room, which makes the spacing a
+ * guarantee instead of something a random sampler merely tends to achieve. If the field can't hold
+ * `count` tiles at the requested spacing, the spacing shrinks just enough to fit (callers avoid this
+ * by planning with `getBeeLineTileLayout` first).
+ */
+function placeTilesOnLattice(
+  field: Bounds,
+  tileSize: number,
+  minSpacingPx: number,
+  count: number,
+  random: () => number,
+): Point[] {
+  const margin = tileSize / 2 + BEE_LINE_FIELD_EDGE_PAD_PX;
+  const rangeX = Math.max(field.width - margin * 2, 0);
+  const rangeY = Math.max(field.height - margin * 2, 0);
+  const { columns, rows, stepX, stepY } = fitLattice(rangeX, rangeY, count);
+
+  const spacingX = Math.min(stepX, minSpacingPx);
+  const spacingY = Math.min(stepY, minSpacingPx);
+  // Half the room beyond the required spacing; a lone column/row can use the whole range.
+  const jitterX = columns > 1 ? Math.max(stepX - spacingX, 0) / 2 : rangeX / 2;
+  const jitterY = rows > 1 ? Math.max(stepY - spacingY, 0) / 2 : rangeY / 2;
+
+  const cells = shuffleLetters(
+    Array.from({ length: columns * rows }, (_, index) => index),
+    random,
+  ).slice(0, count);
+
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+  return cells.map((cell) => {
+    const column = cell % columns;
+    const row = Math.floor(cell / columns);
+    const centreX = columns > 1 ? column * stepX : rangeX / 2;
+    const centreY = rows > 1 ? row * stepY : rangeY / 2;
+
+    return {
+      x: field.x + margin + clamp(centreX + (random() * 2 - 1) * jitterX, 0, rangeX),
+      y: field.y + margin + clamp(centreY + (random() * 2 - 1) * jitterY, 0, rangeY),
+    };
+  });
+}
+
 /**
  * Builds a scattered field for `word` with `decoyCount` decoys, placed within `field` bounds with
- * minimum spacing so no tile overlaps or hides another (UX Step 16's "decoys must not literally
- * hide correct letters"). Pure — RNG injected for testability, mirroring honey-pot-flick.ts.
+ * a guaranteed minimum edge-to-edge gap so no tile overlaps or hides another (UX Step 16's "decoys
+ * must not literally hide correct letters", tightened in Epic 29 to one full tile-width). Pure —
+ * RNG injected for testability, mirroring honey-pot-flick.ts.
  * Reuses honey-pot-flick.ts's `DECOY_LETTER_POOL`/`shuffleLetters` for decoy selection.
  *
  * Repeated letters (e.g. "bee") are modeled per-occurrence via `orderIndex` on each tile, so
@@ -232,31 +263,74 @@ export function buildBeeLineField(
   options: BuildBeeLineFieldOptions = {},
 ): BeeLineField {
   const random = options.random ?? Math.random;
-  const tileSize = options.tileSize ?? DEFAULT_MIN_TILE_SPACING_PX;
-  const minTileSpacingPx = options.minTileSpacingPx ?? tileSize;
+  const tileSize = options.tileSize ?? DEFAULT_TILE_SIZE_PX;
+  const minTileSpacingPx = options.minTileSpacingPx ?? tileSize * (1 + BEE_LINE_GAP_FACTOR);
 
   const wordLetters = word.split('');
-  const availableDecoys = shuffleLetters(
+  const decoyLetters = shuffleLetters(
     DECOY_LETTER_POOL.filter((letter) => !wordLetters.includes(letter)),
     random,
   ).slice(0, Math.max(decoyCount, 0));
 
-  const placed: Point[] = [];
-  const tiles: ScatteredLetter[] = [];
+  const positions = placeTilesOnLattice(
+    field,
+    tileSize,
+    minTileSpacingPx,
+    wordLetters.length + decoyLetters.length,
+    random,
+  );
 
-  wordLetters.forEach((letter, index) => {
-    const position = placeTile(field, tileSize, minTileSpacingPx, placed, random);
-    placed.push(position);
-    tiles.push({ id: `correct-${index}`, letter, kind: 'correct', orderIndex: index, position });
-  });
-
-  availableDecoys.forEach((letter, index) => {
-    const position = placeTile(field, tileSize, minTileSpacingPx, placed, random);
-    placed.push(position);
-    tiles.push({ id: `decoy-${index}`, letter, kind: 'decoy', orderIndex: null, position });
-  });
+  const tiles: ScatteredLetter[] = [
+    ...wordLetters.map(
+      (letter, index): ScatteredLetter => ({
+        id: `correct-${index}`,
+        letter,
+        kind: 'correct',
+        orderIndex: index,
+        position: positions[index],
+      }),
+    ),
+    ...decoyLetters.map(
+      (letter, index): ScatteredLetter => ({
+        id: `decoy-${index}`,
+        letter,
+        kind: 'decoy',
+        orderIndex: null,
+        position: positions[wordLetters.length + index],
+      }),
+    ),
+  ];
 
   return { word, tiles };
+}
+
+/**
+ * Which tile (if any) the steered head is touching right now. Checks every uncollected tile, not
+ * just the next one, so brushing a wrong tile still counts as a mistake — but with two different
+ * reach distances (Epic 29): the *next expected* letter is only picked up when the head's centre is
+ * clearly over it, and every other tile only bumps when the head's centre is well inside the visible
+ * tile, so grazing past a wrong letter is forgiven.
+ */
+export function findTouchedTile(
+  head: Point,
+  tiles: ScatteredLetter[],
+  collectedIds: ReadonlySet<string>,
+  nextExpectedIndex: number,
+  tileSize: number,
+): ScatteredLetter | null {
+  for (const tile of tiles) {
+    if (collectedIds.has(tile.id)) {
+      continue;
+    }
+
+    const isNext = tile.kind === 'correct' && tile.orderIndex === nextExpectedIndex;
+    const reach = tileSize * (isNext ? PICKUP_RADIUS_FACTOR : BUMP_RADIUS_FACTOR);
+    if (Math.hypot(head.x - tile.position.x, head.y - tile.position.y) <= reach) {
+      return tile;
+    }
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
