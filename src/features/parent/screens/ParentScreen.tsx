@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { useProgressStore } from '@/stores/progress-store';
-import { useProfileStore } from '@/stores/profile-store';
+import { useActiveChild, useFamilyStore } from '@/stores/family-store';
+import { RequireParent } from '@/features/family/components/RequireParent';
 import { useWordListStore } from '@/stores/word-list-store';
 
 const MAX_RECENT_SESSIONS_SHOWN = 6;
@@ -15,8 +16,18 @@ function formatSessionDate(timestamp: number): string {
   return `${datePart} · ${timePart}`;
 }
 
+/** Parent View sits behind the parent PIN gate (Epic 30). */
 export function ParentScreen() {
-  const profile = useProfileStore((state) => state.profile);
+  return (
+    <RequireParent next="/parent">
+      <ParentReport />
+    </RequireParent>
+  );
+}
+
+function ParentReport() {
+  const activeChild = useActiveChild();
+  const childCount = useFamilyStore((state) => state.children.length);
   const sessions = useProgressStore((state) => state.sessions);
   const wordStats = useProgressStore((state) => state.wordStats);
   const clearWordStats = useProgressStore((state) => state.clearWordStats);
@@ -95,7 +106,24 @@ export function ParentScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.subtitle}>{profile ? `How ${profile.name} is doing` : 'How your child is doing'}</Text>
+        <Pressable
+          testID="manage-children-button"
+          accessibilityRole="button"
+          style={styles.manageChildrenButton}
+          onPress={() => router.replace('/children')}
+        >
+          <Text style={styles.manageChildrenText}>👪 Manage children</Text>
+        </Pressable>
+
+        {/* Progress is still stored per device until Epic 31 makes it per child, so with more than
+            one child these numbers are everyone's together; say so rather than pin them on one name. */}
+        <Text style={styles.subtitle}>
+          {childCount > 1
+            ? "Everyone's practice on this device (per-child reports coming soon)"
+            : activeChild
+              ? `How ${activeChild.name} is doing`
+              : 'How your child is doing'}
+        </Text>
 
         {!hasActivity ? (
           <View style={styles.emptyCard}>
@@ -249,6 +277,21 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: theme.spacing.lg,
     paddingBottom: theme.spacing.xl * 2,
+  },
+  manageChildrenButton: {
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: theme.colors.gold,
+  },
+  manageChildrenText: {
+    fontWeight: '800',
+    color: theme.colors.text,
   },
   subtitle: {
     color: theme.colors.muted,

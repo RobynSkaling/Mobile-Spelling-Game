@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
-import { useProfileStore } from '@/stores/profile-store';
+import { useActiveChild, useFamilyStore } from '@/stores/family-store';
+import { ChildAvatar } from '@/features/family/components/ChildAvatar';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { useGameSelectionStore } from '@/stores/game-selection-store';
@@ -13,20 +14,33 @@ import { StickerAlbumScreen, StickerAlbumButton } from '@/features/rewards';
 
 export function HomeScreen() {
   const [albumOpen, setAlbumOpen] = useState(false);
-  const profile = useProfileStore((state) => state.profile);
+  const activeChild = useActiveChild();
+  const familyHydrated = useFamilyStore((state) => state.isHydrated);
+  const lockParentArea = useFamilyStore((state) => state.lockParentArea);
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const mode = useGameModeStore((state) => state.mode);
   const setMode = useGameModeStore((state) => state.setMode);
   const selectedGame = useGameSelectionStore((state) => state.selectedGame);
   const setSelectedGame = useGameSelectionStore((state) => state.setSelectedGame);
 
+  // Coming back to Home always re-locks the parent area, so a child can't wander from Home into
+  // Parent View on a PIN the parent entered earlier (Epic 30).
+  useEffect(() => {
+    lockParentArea();
+  }, [lockParentArea]);
+
   const handlePlay = () => {
-    if (!profile) {
-      router.replace('/profile');
+    if (!activeChild) {
+      router.replace('/whos-playing');
       return;
     }
     router.replace(selectedGame === 'bee-line' ? '/bee-line' : '/play');
   };
+
+  // A family with no children yet (e.g. a deep link straight to /home) goes through setup first.
+  if (familyHydrated && !activeChild) {
+    return <Redirect href="/parent-setup" />;
+  }
 
   return (
     <>
@@ -35,6 +49,23 @@ export function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {activeChild ? (
+          // Top-left corner, absolutely positioned so it adds no height (Epic 30). Opens "Who's
+          // playing?" to switch child.
+          <Pressable
+            testID="child-chip"
+            accessibilityRole="button"
+            accessibilityLabel={`Playing as ${activeChild.name}. Switch player.`}
+            onPress={() => router.replace('/whos-playing')}
+            style={({ pressed }) => [styles.childChip, pressed && styles.pressed]}
+          >
+            <ChildAvatar emoji={activeChild.avatar} size={26} />
+            <Text style={styles.childChipName} numberOfLines={1}>
+              {activeChild.name}
+            </Text>
+          </Pressable>
+        ) : null}
+
         <Character characterId="mama-bear" size="medium" style={styles.characterBadge} />
         <Text style={styles.title}>Mama Bear's Spelling Bee</Text>
 
@@ -132,12 +163,6 @@ export function HomeScreen() {
             <Text style={styles.actionButtonLabel}>Parent View</Text>
           </Pressable>
         </View>
-
-        {profile ? (
-          <Pressable onPress={() => router.replace('/profile')}>
-            <Text style={styles.switchProfile}>Not {profile.name}? Switch profile</Text>
-          </Pressable>
-        ) : null}
       </ScrollView>
 
       {/* A modal over Home, not a stacked route: one tap in (the Sticker Album button), one tap out (UX Step 21). */}
@@ -259,10 +284,32 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '800',
   },
-  switchProfile: {
-    marginTop: theme.spacing.sm,
-    color: theme.colors.muted,
-    textDecorationLine: 'underline',
+  childChip: {
+    position: 'absolute',
+    top: theme.spacing.sm,
+    left: theme.spacing.sm,
+    zIndex: 1,
+    // Capped so it clears the centred Mama Bear badge at 320pt wide; long names truncate.
+    maxWidth: 96,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 4,
+    paddingRight: theme.spacing.xs,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: theme.colors.surface,
+  },
+  childChipName: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '800',
+    color: theme.colors.text,
+  },
+  pressed: {
+    transform: [{ scale: 0.95 }],
   },
   selectedListLabel: {
     marginTop: theme.spacing.xs,

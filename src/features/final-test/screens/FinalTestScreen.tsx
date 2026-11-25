@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, Easing, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
-import { useProfileStore } from '@/stores/profile-store';
+import { useActiveChild } from '@/stores/family-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useProgressStore } from '@/stores/progress-store';
 import { speechService } from '@/shared/lib/speech';
@@ -22,7 +22,7 @@ function formatToday(): string {
 }
 
 export function FinalTestScreen() {
-  const profile = useProfileStore((state) => state.profile);
+  const profile = useActiveChild();
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const startSession = useProgressStore((state) => state.startSession);
   const recordWordCompleted = useProgressStore((state) => state.recordWordCompleted);

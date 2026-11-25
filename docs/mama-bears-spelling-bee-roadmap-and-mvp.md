@@ -1701,6 +1701,72 @@ Replace the single device profile with a **family**: one parent account (PIN-pro
 
 Epics 28 and 29 (both games playable first). This is the foundation for Epics 31–33 and 36.
 
+#### Revised: Implemented
+
+All acceptance criteria are met in the web build. What landed:
+
+- **Data model and rules (`src/stores/family-logic.ts`, pure, unit-tested):**
+  - `ParentAccount` (salted PIN hash) and `ChildProfile` (id, name, avatar, birthMonth, birthYear, createdAt) inside one `FamilyState` with a `schemaVersion`.
+  - Rules: `addChild` / `updateChild` / `removeChild` / `setActiveChild`, `MAX_CHILDREN = 6`, `getAge(birthMonth, birthYear, today)` for Epic 33, launch routing, avatar suggestion, the forgotten-PIN challenge, and the gate's allowed destinations.
+  - 37 new tests (`family-logic.test.ts` and `sha256.test.ts`).
+- **PIN storage:**
+  - The PIN is stored only as a salted SHA-256 hash, never in plain text (verified in a test and in the end-to-end run).
+  - SHA-256 is a small pure-TypeScript implementation (`src/shared/lib/crypto/sha256.ts`), checked against the FIPS test vectors and Node's own `crypto` across padding boundaries. **Judgment call:** in-repo rather than `expo-crypto` or `expo-secure-store`, so it behaves identically on iOS, Android and web, offline, with no new native dependency.
+  - A 4-digit PIN is brute-forceable by anyone with device access whatever the hashing. That matches the product decision that this is a speed bump for children, not a security boundary.
+  - Architecture can still move the hash into `expo-secure-store` later without changing the screens.
+- **Store (`src/stores/family-store.ts`):**
+  - One AsyncStorage blob (`family.v1`), loaded at startup in place of the old `profile-store`, which is now deleted along with the old `ProfileScreen`.
+  - `parentUnlocked` lives in memory only. It is set by a correct PIN and cleared every time Home is shown, so leaving the parent area always re-locks it.
+  - `useActiveChild()` replaces `useProfileStore().profile` everywhere (Home, Final Test, Parent View; Honey Pot Flick held an unused reference that was removed).
+- **Migration:**
+  - On first launch after this epic, an existing `profile` becomes the first, active child, keeping its id so Epic 31 can attach the per-device progress to it.
+  - Birth month and year are unknown until the parent adds them (the children list says "Age not set yet").
+  - No PIN is set; the first visit to a parent-only area asks the parent to create one.
+  - The old `profile` key is left in place, so an interrupted migration simply re-runs. Epic 31 owns cleaning up old per-device keys.
+- **Screens (`src/features/family/`):**
+  - First-launch setup: create PIN, confirm, then add the first child. If the app closes after the PIN step, setup resumes at "add child".
+  - Parent gate (`/parent-gate?next=`): enter PIN, create PIN for migrated families, and "Forgot PIN?" with a multi-step sum such as `(12 × 7) + 19`. A wrong answer gets a fresh sum. A reset keeps all children.
+  - "Who's playing?" (`/whos-playing`): large avatar tiles, the current child in gold, and a "Grown-ups: add or change children" link through the gate.
+  - Manage children (`/children`): list with age, Edit and Remove, and Add (disabled at 6).
+  - Add/edit child (`/child-edit`): name, avatar, birth month chips, birth year stepper (ages 2–16 allowed).
+  - Parent View is wrapped in the gate and gains a "Manage children" button.
+  - `/profile` now redirects to "Who's playing?".
+- **Home:**
+  - A child chip in the top-left (avatar and name) opens "Who's playing?".
+  - The chip is capped at 96px so it clears the centred Mama Bear badge at 320pt; longer names truncate.
+  - The "Not {name}? Switch profile" link is gone.
+- **Launch routing (`app/index.tsx`):**
+  - No children → setup.
+  - One child → Home.
+  - Two or more → "Who's playing?".
+  - It waits for the family to load first, so it never routes on the empty default.
+
+**Judgment calls:**
+
+- **The only child can't be removed** ("A family needs at least one child. Add another child before removing this one."). This avoids a family with nobody to play as.
+- **Removing a child today deletes only the profile.** Progress, streak and stickers are still stored per device until Epic 31, so there is no child-specific data to delete yet. The warning text describes the behaviour once Epic 31 lands.
+- **Parent View says "Everyone's practice on this device (per-child reports coming soon)"** when there are 2 or more children, rather than labelling shared per-device numbers with one child's name. Epic 32 replaces this.
+- **New children start on an avatar no sibling uses**, so "Who's playing?" doesn't show identical tiles by default.
+- **The gate only forwards to known parent screens** (`/parent`, `/children`, `/child-edit`). Any other `next` value falls back to Parent View, and this is tested.
+- **Remove child is not Tomato red**: a white button, since red means "wrong answer" to the children. Cancel appears at the top and under the keypad.
+
+**Verification:**
+
+- `npm test` passes 214/214 (37 new). `npx tsc --noEmit` is clean. The web export builds (2.23 MB, up from 2.19 MB).
+- A 35-step headless-Chrome run at 320×568 passed with no page errors. It covered:
+  - setup, including a mismatched PIN and an empty form;
+  - the PIN stored hashed;
+  - the Home chip;
+  - the gate with wrong and right PINs;
+  - adding a second child;
+  - re-lock after returning Home;
+  - "Who's playing?" on relaunch, switching child, and the chip opening it;
+  - remove: warning, cancel, wrong PIN, right PIN, active child moving, and the last child refused;
+  - Forgot PIN: wrong answer, reset, old PIN rejected, new PIN accepted;
+  - migration from a legacy `profile`: straight to Home, id kept, no PIN, key kept, PIN created on first parent visit.
+- `npm run smoke:layout` still passes for both games at all three sizes.
+- **Not done:** a real-device test (the PIN pad and forms on a phone keyboard and notch), and tablet screenshots of the new screens.
+
 ---
 
 ### Epic 31 — Per-Child Data (Progress, Streaks, Stickers, Settings)

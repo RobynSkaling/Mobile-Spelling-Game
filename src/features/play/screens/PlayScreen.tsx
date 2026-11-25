@@ -5,7 +5,6 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
 import { HONEY_LARDER_FLOOR, useSessionStore } from '@/stores/session-store';
-import { useProfileStore } from '@/stores/profile-store';
 import { useWordListStore } from '@/stores/word-list-store';
 import { useGameModeStore } from '@/stores/game-mode-store';
 import { useProgressStore } from '@/stores/progress-store';
@@ -123,7 +122,6 @@ export function PlayScreen() {
     stealHoneyPot,
     resetHoneyStash,
   } = useSessionStore();
-  const { profile } = useProfileStore();
   const selectedList = useWordListStore((state) => state.getSelectedList());
   const words = useMemo(() => selectedList?.words ?? [], [selectedList]);
   const gameMode = useGameModeStore((state) => state.mode);
