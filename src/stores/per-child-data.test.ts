@@ -46,8 +46,15 @@ describe('per-child stores', () => {
     await loadPerChildStores('a');
   });
 
+  it('records which game a new session was played in', () => {
+    useProgressStore.getState().startSession('bee-line');
+    assert.equal(useProgressStore.getState().sessions[0].game, 'bee-line');
+    const stored = JSON.parse(data.get('progress.sessions.child.a') ?? '[]');
+    assert.equal(stored[0].game, 'bee-line');
+  });
+
   it('playing as child A never changes child B data', async () => {
-    useProgressStore.getState().startSession();
+    useProgressStore.getState().startSession('honey-pot-flick');
     useProgressStore.getState().recordWordCompleted('cat');
     useDailyRewardsStore.getState().recordCompletedPlay(DAY);
     useGameModeStore.getState().setMode('hard');
@@ -98,7 +105,7 @@ describe('per-child stores', () => {
     useGameModeStore.getState().setMode('hard');
     await loadPerChildStores('b');
     useGameModeStore.getState().setMode('easy');
-    useProgressStore.getState().startSession();
+    useProgressStore.getState().startSession('honey-pot-flick');
     data.set('word-lists.custom', '[]');
     await flush();
     const aBefore = childDataKeys('a').filter((key) => data.has(key));

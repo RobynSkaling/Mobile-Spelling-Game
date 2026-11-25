@@ -1885,6 +1885,39 @@ As a parent, I want to pick one of my children and see how they are doing, so I 
 
 Epics 30 and 31.
 
+#### Revised: Implemented
+
+All acceptance criteria are met in the web build. No real-device test was done; verification was unit tests plus headless Chrome against the web export.
+
+What landed:
+
+- **Per-child reports without changing who is playing.** `features/parent/data/child-report-storage.ts` reads any child's progress, daily rewards and Final Tests straight from their keys (`loadChildReport`). Nothing swaps the live stores and `activeChildId` is never touched. Parent View is now built around a viewed child id.
+- **Child switcher** (`ChildSwitcher`): wrapping avatar + name chips, at least 44pt tall, one selected. It opens on the active child and remembers the last child viewed in memory (`viewed-child-store.ts`).
+- **Sections for the viewed child:** Summary (sessions this week, words spelled, accuracy), Streak, Stickers, Most-played game, Words to practice, Recent sessions, Final Test history. The empty state reads "Nothing yet — {name} hasn't played a round".
+- **Pure helpers** in `features/parent/logic/report-logic.ts` (injectable "now" and timezone offset): `sessionsThisWeek`, `accuracy`, `trickyWords`, `mostPlayedGame`, `streakSummary`, `stickerCounts` / `formatStickerCounts`, `finalTestHistory`, `parseChildReportData`, `resolveViewedChildId`.
+- **Sessions record their game.** `SessionRecord.game` is set by `startSession(game)` from Honey Pot Flick, Bee Line and the Final Test. Older records have no game: they show as "Unknown game" and are not counted towards the most-played game.
+- **Clear word stats and Tricky Words** act on the viewed child. Clearing rewrites only that child's word-stats key (through the live store when that child is the loaded one). The confirmation names the child. The Tricky Words list is created for the family and selected for the viewed child only.
+- Streak wording reuses `getStreakStatus` and the child-facing captions; a "0" streak is never shown (lapsed and new read as a fresh start). Tomato is only used for miss counts. Sections with long lists (tricky words, sessions, Final Tests) scroll inside a 260pt-high area.
+
+Judgment calls:
+
+- **"Remembers the last child viewed"** is in memory and cleared when the parent area re-locks (every Home visit), so a new visit opens on whoever is playing, while a trip to Manage children or the list editor and back returns to the same child. Nothing is stored on disk.
+- **"This week"** is a rolling 7 local days including today, so the number does not reset on a Monday.
+- **Accuracy** is correct vs missed flicks over the stored sessions (the last 50), and says "recent rounds". **Words spelled** is the sum of word stats, as before, so it drops if word stats are cleared.
+- **Final Test sessions** are recorded with game `final-test`, shown as "Final Test" in Recent sessions and not counted in most-played (a Final Test is not a game choice).
+- **Most-played tie** reads "Both games equally".
+- **Stickers** show "Stickers N / M" using the single placeholder catalog. `stickerCounts` groups by an optional `collection` on catalog entries, so Epic 34 only needs to add that field to get "Core 12 / 50 · Holiday 2 / 20".
+- **Final Test wording** for a not-yet-passed test is "Keep practising · 6 / 10".
+- The Back button on Parent View got a test id and button role, and the title no longer wraps at 320pt.
+
+Verification:
+
+- `npm test`: 257 passing (231 before; 26 new: 25 in `report-logic.test.ts`, 1 in `per-child-data.test.ts` for the recorded game).
+- `npx tsc --noEmit` clean. `npx expo export --platform web` builds (into a scratch folder). `npm run smoke:layout` passes.
+- Headless Chrome end to end (43 checks, no page errors) with three children: each child's sessions this week, words, accuracy, streak (active, and resting with longest), stickers, most-played game, tricky words and Final Tests are their own; switching the report child leaves `activeChildId` and Home's "playing as" unchanged; Mia shows the empty state; the last viewed child survives Manage children and a fresh visit opens on the active child; clearing stats for Pip leaves Hoots's stats and both children's sessions byte-for-byte unchanged and the confirmation names Pip; a Tricky Words list made while viewing Pip is selected for Pip only. Screenshots checked at 320x568 and 375x667; no horizontal overflow and every button at least 44pt at 320.
+
+Not met or left out: nothing in the acceptance criteria. Not done: real-device testing, time spent practising (needs session end times), and an e2e check of the "viewed child is also the loaded child" branch of Clear/Tricky actions (it goes through the existing store methods).
+
 ---
 
 ### Epic 33 — Age-Based Grace Days (Editable Config)

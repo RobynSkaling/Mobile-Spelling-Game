@@ -105,7 +105,7 @@ export function FinalTestScreen() {
     setWordIndex(0);
     setResults([]);
     setPhase('testing');
-    startSession();
+    startSession('final-test');
   };
 
   const handleTapLetter = (letter: string, index: number) => {
@@ -179,7 +179,7 @@ export function FinalTestScreen() {
     setWordIndex(0);
     setResults([]);
     setPhase('testing');
-    startSession();
+    startSession('final-test');
   };
 
   const handleGoHome = () => router.replace('/home');

@@ -1,20 +1,35 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { theme } from '@/shared/lib/theme';
-import { useProgressStore } from '@/stores/progress-store';
-import { useActiveChild } from '@/stores/family-store';
+import { useFamilyStore } from '@/stores/family-store';
 import { RequireParent } from '@/features/family/components/RequireParent';
 import { useWordListStore } from '@/stores/word-list-store';
+import { localDayKey } from '@/stores/daily-rewards-logic';
+import { STICKER_CATALOG } from '@/data/rewards/sticker-catalog';
+import { ChildSwitcher } from '../components/ChildSwitcher';
+import { clearWordStatsForChild, loadChildReport, selectListForChild } from '../data/child-report-storage';
+import { useViewedChildStore } from '../data/viewed-child-store';
+import {
+  accuracy,
+  ChildReportData,
+  emptyStateText,
+  finalTestHistory,
+  formatSessionDateTime,
+  formatStickerCounts,
+  GAME_NAMES,
+  gameLabel,
+  hasNoPlay,
+  mostPlayedGame,
+  resolveViewedChildId,
+  sessionsThisWeek,
+  stickerCounts,
+  streakSummary,
+  totalWordsCompleted,
+  trickyWords,
+} from '../logic/report-logic';
 
-const MAX_RECENT_SESSIONS_SHOWN = 6;
-
-function formatSessionDate(timestamp: number): string {
-  const date = new Date(timestamp);
-  const datePart = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  const timePart = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  return `${datePart} · ${timePart}`;
-}
+const MAX_RECENT_SESSIONS_SHOWN = 10;
 
 /** Parent View sits behind the parent PIN gate (Epic 30). */
 export function ParentScreen() {
@@ -25,35 +40,77 @@ export function ParentScreen() {
   );
 }
 
+type LoadedReport = { childId: string; data: ChildReportData };
+
 function ParentReport() {
-  const activeChild = useActiveChild();
-  const sessions = useProgressStore((state) => state.sessions);
-  const wordStats = useProgressStore((state) => state.wordStats);
-  const clearWordStats = useProgressStore((state) => state.clearWordStats);
+  const children = useFamilyStore((state) => state.children);
+  const activeChildId = useFamilyStore((state) => state.activeChildId);
+  const remembered = useViewedChildStore((state) => state.viewedChildId);
+  const setViewedChildId = useViewedChildStore((state) => state.setViewedChildId);
   const createListWithWords = useWordListStore((state) => state.createListWithWords);
 
+  const viewedId = resolveViewedChildId(
+    children.map((child) => child.id),
+    remembered,
+    activeChildId,
+  );
+  const viewedChild = children.find((child) => child.id === viewedId) ?? null;
+
+  const [report, setReport] = useState<LoadedReport | null>(null);
+  const [reloadCount, setReloadCount] = useState(0);
   const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [makeListError, setMakeListError] = useState<string | null>(null);
 
-  const totals = useMemo(() => {
-    const wordsCompleted = Object.values(wordStats).reduce((sum, word) => sum + word.timesCompleted, 0);
-    const correctAnswers = sessions.reduce((sum, session) => sum + session.correctFlicks, 0);
-    return { wordsCompleted, correctAnswers, sessionCount: sessions.length };
-  }, [sessions, wordStats]);
+  useEffect(() => {
+    if (!viewedId) {
+      return;
+    }
+    let cancelled = false;
+    void loadChildReport(viewedId).then((data) => {
+      if (!cancelled) {
+        setReport({ childId: viewedId, data });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewedId, reloadCount]);
 
-  const missedWords = useMemo(
-    () =>
-      Object.values(wordStats)
-        .filter((word) => word.timesMissed > 0)
-        .sort((a, b) => b.timesMissed - a.timesMissed),
-    [wordStats],
+  const selectChild = useCallback(
+    (id: string) => {
+      setViewedChildId(id);
+      setSelectedWords(new Set());
+      setConfirmingClear(false);
+      setMakeListError(null);
+    },
+    [setViewedChildId],
   );
 
-  const recentSessions = useMemo(() => sessions.slice(0, MAX_RECENT_SESSIONS_SHOWN), [sessions]);
+  // Only ever render data that belongs to the child on screen.
+  const data = report && report.childId === viewedId ? report.data : null;
 
-  const hasActivity = sessions.length > 0;
-  const allSelected = missedWords.length > 0 && selectedWords.size === missedWords.length;
+  const view = useMemo(() => {
+    if (!data) {
+      return null;
+    }
+    const now = Date.now();
+    const tricky = trickyWords(data.wordStats);
+    return {
+      weekSessions: sessionsThisWeek(data.sessions, now, -new Date(now).getTimezoneOffset()),
+      wordsCompleted: totalWordsCompleted(data.wordStats),
+      accuracy: accuracy(data.sessions),
+      tricky,
+      recent: data.sessions.slice(0, MAX_RECENT_SESSIONS_SHOWN),
+      streak: streakSummary(data.rewards?.streak ?? null, localDayKey(now)),
+      stickers: formatStickerCounts(stickerCounts(data.rewards?.album ?? null, STICKER_CATALOG)),
+      mostPlayed: mostPlayedGame(data.sessions),
+      finalTests: finalTestHistory(data.finalTests),
+    };
+  }, [data]);
+
+  const tricky = view?.tricky ?? [];
+  const allSelected = tricky.length > 0 && selectedWords.size === tricky.length;
 
   const toggleWord = (word: string) => {
     setSelectedWords((current) => {
@@ -69,39 +126,41 @@ function ParentReport() {
   };
 
   const toggleSelectAll = () => {
-    setSelectedWords(allSelected ? new Set() : new Set(missedWords.map((word) => word.word)));
+    setSelectedWords(allSelected ? new Set() : new Set(tricky.map((word) => word.word)));
     setMakeListError(null);
   };
 
-  const handleMakeWordList = () => {
-    if (selectedWords.size === 0) {
+  const handleMakeWordList = async () => {
+    if (selectedWords.size === 0 || !viewedId) {
       return;
     }
-
     const { list, error } = createListWithWords('Tricky Words', Array.from(selectedWords));
     if (error || !list) {
       setMakeListError(error);
       return;
     }
-
+    await selectListForChild(viewedId, list.id);
     setSelectedWords(new Set());
     router.replace({ pathname: '/list-editor', params: { listId: list.id } });
   };
 
-  const handleClearSelectedConfirmed = () => {
-    clearWordStats(Array.from(selectedWords));
+  const handleClearSelectedConfirmed = async () => {
+    if (!viewedId) {
+      return;
+    }
+    await clearWordStatsForChild(viewedId, Array.from(selectedWords));
     setSelectedWords(new Set());
     setConfirmingClear(false);
+    setReloadCount((count) => count + 1);
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.replace('/home')}>
+        <Pressable testID="parent-back-button" accessibilityRole="button" style={styles.backButton} onPress={() => router.replace('/home')}>
           <Text style={styles.backButtonText}>← Back</Text>
         </Pressable>
         <Text style={styles.title}>Parent View</Text>
-        <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -114,121 +173,225 @@ function ParentReport() {
           <Text style={styles.manageChildrenText}>👪 Manage children</Text>
         </Pressable>
 
-        <Text style={styles.subtitle}>
-          {activeChild ? `How ${activeChild.name} is doing` : 'How your child is doing'}
+        {children.length > 0 ? (
+          <ChildSwitcher childProfiles={children} selectedId={viewedId} onSelect={selectChild} />
+        ) : null}
+
+        <Text testID="report-title" style={styles.subtitle}>
+          {viewedChild ? `How ${viewedChild.name} is doing` : 'No children yet'}
         </Text>
 
-        {!hasActivity ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyCardText}>No activity yet — encourage your child to play a round!</Text>
-          </View>
-        ) : (
-          <>
-            <View style={styles.statsRow}>
-              <View style={styles.statTile}>
-                <Text testID="stat-sessions" style={styles.statValue}>
-                  {totals.sessionCount}
-                </Text>
-                <Text style={styles.statLabel}>Sessions</Text>
-              </View>
-              <View style={styles.statTile}>
-                <Text testID="stat-words-completed" style={styles.statValue}>
-                  {totals.wordsCompleted}
-                </Text>
-                <Text style={styles.statLabel}>Words spelled</Text>
-              </View>
-              <View style={styles.statTile}>
-                <Text testID="stat-correct-answers" style={styles.statValue}>
-                  {totals.correctAnswers}
-                </Text>
-                <Text style={styles.statLabel}>Correct answers</Text>
-              </View>
+        {viewedChild && data && view ? (
+          hasNoPlay(data) ? (
+            <View testID="report-empty" style={styles.emptyCard}>
+              <Text style={styles.emptyCardText}>{emptyStateText(viewedChild.name)}</Text>
             </View>
-
-            <View style={styles.trickyHeaderRow}>
-              <Text style={styles.sectionLabel}>Words to practice</Text>
-              {missedWords.length > 0 ? (
-                <Pressable testID="select-all-tricky" onPress={toggleSelectAll}>
-                  <Text style={styles.selectAllText}>{allSelected ? 'Deselect all' : 'Select all'}</Text>
-                </Pressable>
-              ) : null}
-            </View>
-
-            {missedWords.length === 0 ? (
-              <Text style={styles.emptyText}>No tricky words yet — great job!</Text>
-            ) : (
-              <>
-                <View style={styles.card}>
-                  {missedWords.map((word, index) => {
-                    const selected = selectedWords.has(word.word);
-                    return (
-                      <Pressable
-                        key={word.word}
-                        testID={`tricky-word-${word.word}`}
-                        style={[
-                          styles.wordRow,
-                          selected && styles.wordRowSelected,
-                          index === missedWords.length - 1 && styles.rowNoBorder,
-                        ]}
-                        onPress={() => toggleWord(word.word)}
-                      >
-                        <View style={[styles.checkbox, selected && styles.checkboxChecked]}>
-                          {selected ? <Text style={styles.checkboxMark}>✓</Text> : null}
-                        </View>
-                        <Text style={styles.wordText}>{word.word}</Text>
-                        <Text style={styles.wordMissCount}>missed {word.timesMissed}x</Text>
-                      </Pressable>
-                    );
-                  })}
+          ) : (
+            <>
+              <View style={styles.statsRow}>
+                <View style={styles.statTile}>
+                  <Text testID="stat-sessions-week" style={styles.statValue}>
+                    {view.weekSessions}
+                  </Text>
+                  <Text style={styles.statLabel}>Sessions this week</Text>
                 </View>
+                <View style={styles.statTile}>
+                  <Text testID="stat-words-completed" style={styles.statValue}>
+                    {view.wordsCompleted}
+                  </Text>
+                  <Text style={styles.statLabel}>Words spelled</Text>
+                </View>
+                <View style={styles.statTile}>
+                  <Text testID="stat-accuracy" style={styles.statValue}>
+                    {view.accuracy.percent === null ? '—' : `${view.accuracy.percent}%`}
+                  </Text>
+                  <Text style={styles.statLabel}>Accuracy</Text>
+                </View>
+              </View>
+              <Text testID="stat-correct-missed" style={styles.footnote}>
+                {view.accuracy.correct} correct, {view.accuracy.missed} missed (recent rounds)
+              </Text>
 
-                {selectedWords.size > 0 ? (
-                  <View style={styles.trickyActionsRow}>
-                    <Pressable testID="make-word-list-button" style={styles.makeListButton} onPress={handleMakeWordList}>
-                      <Text style={styles.makeListButtonText}>📝 Make Word List ({selectedWords.size})</Text>
-                    </Pressable>
-                    {!confirmingClear ? (
-                      <Pressable style={styles.clearSelectedButton} onPress={() => setConfirmingClear(true)}>
-                        <Text style={styles.clearSelectedButtonText}>🗑️ Clear Selected</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                ) : null}
-
-                {makeListError ? <Text style={styles.errorText}>{makeListError}</Text> : null}
-
-                {confirmingClear ? (
-                  <View style={styles.confirmRow}>
-                    <Text style={styles.confirmText}>
-                      Remove {selectedWords.size} word{selectedWords.size === 1 ? '' : 's'} from this list?
+              <Text style={styles.sectionLabel}>Streak</Text>
+              <View style={styles.card}>
+                <View style={styles.cardBody}>
+                  <Text testID="streak-headline" style={styles.cardHeadline}>
+                    {view.streak.headline}
+                  </Text>
+                  {view.streak.caption ? <Text style={styles.cardCaption}>{view.streak.caption}</Text> : null}
+                  {view.streak.longest ? (
+                    <Text testID="streak-longest" style={styles.cardCaption}>
+                      {view.streak.longest}
                     </Text>
-                    <Pressable style={styles.confirmYesButton} onPress={handleClearSelectedConfirmed}>
-                      <Text style={styles.confirmYesText}>Yes, clear them</Text>
-                    </Pressable>
-                    <Pressable style={styles.confirmNoButton} onPress={() => setConfirmingClear(false)}>
-                      <Text style={styles.confirmNoText}>Cancel</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-              </>
-            )}
+                  ) : null}
+                </View>
+              </View>
 
-            <Text style={styles.sectionLabel}>Recent activity</Text>
-            <View style={styles.card}>
-              {recentSessions.map((session, index) => (
-                <View
-                  key={session.id}
-                  style={[styles.sessionRow, index === recentSessions.length - 1 && styles.rowNoBorder]}
-                >
-                  <Text style={styles.sessionDate}>{formatSessionDate(session.startedAt)}</Text>
-                  <Text style={styles.sessionDetail}>
-                    {session.wordsCompleted} word{session.wordsCompleted === 1 ? '' : 's'} spelled
+              <Text style={styles.sectionLabel}>Stickers</Text>
+              <View style={styles.card}>
+                <View style={styles.cardBody}>
+                  <Text testID="sticker-counts" style={styles.cardHeadline}>
+                    {view.stickers}
                   </Text>
                 </View>
-              ))}
-            </View>
-          </>
-        )}
+              </View>
+
+              <Text style={styles.sectionLabel}>Most-played game</Text>
+              <View style={styles.card}>
+                <View style={styles.cardBody}>
+                  <Text testID="most-played" style={styles.cardHeadline}>
+                    {view.mostPlayed.leader === null
+                      ? 'Not enough rounds yet'
+                      : view.mostPlayed.leader === 'tie'
+                        ? 'Both games equally'
+                        : GAME_NAMES[view.mostPlayed.leader]}
+                  </Text>
+                  <Text style={styles.cardCaption}>
+                    {GAME_NAMES['honey-pot-flick']} {view.mostPlayed.counts['honey-pot-flick']} · {GAME_NAMES['bee-line']}{' '}
+                    {view.mostPlayed.counts['bee-line']}
+                    {view.mostPlayed.unknown > 0 ? ` · earlier rounds ${view.mostPlayed.unknown}` : ''}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.trickyHeaderRow}>
+                <Text style={[styles.sectionLabel, styles.sectionLabelInRow]}>Words to practice</Text>
+                {tricky.length > 0 ? (
+                  <Pressable testID="select-all-tricky" style={styles.selectAllButton} onPress={toggleSelectAll}>
+                    <Text style={styles.selectAllText}>{allSelected ? 'Deselect all' : 'Select all'}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+
+              {tricky.length === 0 ? (
+                <Text style={styles.emptyText}>No tricky words yet — great job!</Text>
+              ) : (
+                <>
+                  <View style={styles.card}>
+                    <ScrollView testID="tricky-words-scroll" style={styles.sectionScroll} nestedScrollEnabled>
+                      <View style={styles.cardBody}>
+                        {tricky.map((word, index) => {
+                          const selected = selectedWords.has(word.word);
+                          return (
+                            <Pressable
+                              key={word.word}
+                              testID={`tricky-word-${word.word}`}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: selected }}
+                              style={[
+                                styles.wordRow,
+                                selected && styles.wordRowSelected,
+                                index === tricky.length - 1 && styles.rowNoBorder,
+                              ]}
+                              onPress={() => toggleWord(word.word)}
+                            >
+                              <View style={[styles.checkbox, selected && styles.checkboxChecked]}>
+                                {selected ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                              </View>
+                              <Text style={styles.wordText}>{word.word}</Text>
+                              <Text style={styles.wordMissCount}>missed {word.timesMissed}x</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
+                  </View>
+
+                  {selectedWords.size > 0 ? (
+                    <View style={styles.trickyActionsRow}>
+                      <Pressable
+                        testID="make-word-list-button"
+                        style={styles.makeListButton}
+                        onPress={handleMakeWordList}
+                      >
+                        <Text style={styles.makeListButtonText}>📝 Make Word List ({selectedWords.size})</Text>
+                      </Pressable>
+                      {!confirmingClear ? (
+                        <Pressable
+                          testID="clear-selected-button"
+                          style={styles.clearSelectedButton}
+                          onPress={() => setConfirmingClear(true)}
+                        >
+                          <Text style={styles.clearSelectedButtonText}>🗑️ Clear Selected</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {makeListError ? <Text style={styles.errorText}>{makeListError}</Text> : null}
+
+                  {confirmingClear ? (
+                    <View testID="clear-confirm" style={styles.confirmRow}>
+                      <Text style={styles.confirmText}>
+                        Remove {selectedWords.size} word{selectedWords.size === 1 ? '' : 's'} from{' '}
+                        {viewedChild.name}'s word stats? This only affects {viewedChild.name}.
+                      </Text>
+                      <Pressable
+                        testID="clear-confirm-yes"
+                        style={styles.confirmYesButton}
+                        onPress={handleClearSelectedConfirmed}
+                      >
+                        <Text style={styles.confirmYesText}>Yes, clear them</Text>
+                      </Pressable>
+                      <Pressable style={styles.confirmNoButton} onPress={() => setConfirmingClear(false)}>
+                        <Text style={styles.confirmNoText}>Cancel</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </>
+              )}
+
+              <Text style={styles.sectionLabel}>Recent sessions</Text>
+              <View style={styles.card}>
+                <ScrollView testID="recent-sessions-scroll" style={styles.sectionScroll} nestedScrollEnabled>
+                  <View style={styles.cardBody}>
+                    {view.recent.length === 0 ? (
+                      <Text style={styles.emptyText}>No rounds yet.</Text>
+                    ) : (
+                      view.recent.map((session, index) => (
+                        <View
+                          key={session.id}
+                          testID="recent-session-row"
+                          style={[styles.listRow, index === view.recent.length - 1 && styles.rowNoBorder]}
+                        >
+                          <Text style={styles.rowTitle}>{formatSessionDateTime(session.startedAt)}</Text>
+                          <Text style={styles.rowDetail}>
+                            {gameLabel(session.game)} · {session.wordsCompleted} word
+                            {session.wordsCompleted === 1 ? '' : 's'} spelled
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                </ScrollView>
+              </View>
+
+              <Text style={styles.sectionLabel}>Final Test history</Text>
+              <View style={styles.card}>
+                <ScrollView testID="final-tests-scroll" style={styles.sectionScroll} nestedScrollEnabled>
+                  <View style={styles.cardBody}>
+                    {view.finalTests.length === 0 ? (
+                      <Text style={styles.emptyText}>No Final Tests yet.</Text>
+                    ) : (
+                      view.finalTests.map((test, index) => (
+                        <View
+                          key={test.id}
+                          testID="final-test-row"
+                          style={[styles.listRow, index === view.finalTests.length - 1 && styles.rowNoBorder]}
+                        >
+                          <Text style={styles.rowTitle}>{test.listName}</Text>
+                          <Text style={styles.rowDetail}>
+                            {formatSessionDateTime(test.takenAt)} · {test.result}
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                </ScrollView>
+              </View>
+            </>
+          )
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -248,7 +411,8 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.sm,
   },
   backButton: {
-    paddingVertical: theme.spacing.xs,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: theme.spacing.sm,
     borderRadius: 999,
     backgroundColor: theme.colors.surface,
@@ -260,15 +424,14 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
   },
   title: {
-    fontSize: 24,
+    flex: 1,
+    marginLeft: theme.spacing.sm,
+    fontSize: 22,
     fontWeight: '800',
     color: theme.colors.text,
   },
-  headerSpacer: {
-    width: 76,
-  },
   scrollContent: {
-    padding: theme.spacing.lg,
+    padding: theme.spacing.md,
     paddingBottom: theme.spacing.xl * 2,
   },
   manageChildrenButton: {
@@ -287,8 +450,9 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
   },
   subtitle: {
-    color: theme.colors.muted,
-    fontWeight: '600',
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
     marginBottom: theme.spacing.md,
   },
   emptyCard: {
@@ -307,12 +471,12 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    gap: theme.spacing.sm,
-    marginBottom: theme.spacing.lg,
+    gap: theme.spacing.xs,
   },
   statTile: {
     flex: 1,
-    padding: theme.spacing.sm,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: 4,
     borderRadius: 18,
     backgroundColor: theme.colors.surface,
     borderWidth: 4,
@@ -320,9 +484,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '900',
-    color: theme.colors.primary,
+    color: theme.colors.secondary,
   },
   statLabel: {
     marginTop: 2,
@@ -331,11 +495,23 @@ const styles = StyleSheet.create({
     color: theme.colors.muted,
     textAlign: 'center',
   },
+  footnote: {
+    marginTop: theme.spacing.xs,
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.colors.muted,
+  },
   trickyHeaderRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: theme.spacing.md,
+  },
+  selectAllButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: theme.spacing.xs,
   },
   selectAllText: {
     color: theme.colors.secondary,
@@ -352,6 +528,10 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.md,
     marginBottom: theme.spacing.sm,
   },
+  sectionLabelInRow: {
+    marginTop: 0,
+    marginBottom: 0,
+  },
   emptyText: {
     color: theme.colors.muted,
     fontWeight: '600',
@@ -361,12 +541,32 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 4,
     borderColor: '#111111',
+    overflow: 'hidden',
+  },
+  cardBody: {
     paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+  },
+  cardHeadline: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: theme.colors.text,
+    paddingVertical: 4,
+  },
+  cardCaption: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.muted,
+    paddingBottom: 4,
+  },
+  sectionScroll: {
+    maxHeight: 260,
   },
   wordRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
+    minHeight: 44,
+    paddingVertical: theme.spacing.xs,
     borderBottomWidth: 2,
     borderBottomColor: '#EEEEEE',
     gap: theme.spacing.sm,
@@ -401,6 +601,7 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     textTransform: 'capitalize',
   },
+  // Tomato is reserved for wrong answers; a miss count is exactly that.
   wordMissCount: {
     fontSize: 13,
     fontWeight: '700',
@@ -413,7 +614,8 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
   },
   makeListButton: {
-    paddingVertical: theme.spacing.xs,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: theme.spacing.md,
     borderRadius: 999,
     backgroundColor: theme.colors.secondary,
@@ -426,7 +628,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   clearSelectedButton: {
-    paddingVertical: theme.spacing.xs,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: theme.spacing.md,
     borderRadius: 999,
     backgroundColor: '#FFD6EC',
@@ -439,7 +642,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   errorText: {
-    color: theme.colors.primary,
+    color: theme.colors.text,
     fontWeight: '700',
     marginTop: theme.spacing.sm,
   },
@@ -458,10 +661,11 @@ const styles = StyleSheet.create({
   },
   confirmYesButton: {
     alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: theme.spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: theme.spacing.md,
     borderRadius: 999,
-    backgroundColor: theme.colors.primary,
+    backgroundColor: theme.colors.text,
     borderWidth: 2,
     borderColor: '#111111',
     marginBottom: theme.spacing.xs,
@@ -473,8 +677,9 @@ const styles = StyleSheet.create({
   },
   confirmNoButton: {
     alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: theme.spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: theme.spacing.md,
     borderRadius: 999,
     backgroundColor: theme.colors.surface,
     borderWidth: 2,
@@ -485,20 +690,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 13,
   },
-  sessionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  listRow: {
     paddingVertical: theme.spacing.sm,
     borderBottomWidth: 2,
     borderBottomColor: '#EEEEEE',
   },
-  sessionDate: {
+  rowTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: theme.colors.text,
   },
-  sessionDetail: {
+  rowDetail: {
     fontSize: 13,
     fontWeight: '600',
     color: theme.colors.muted,

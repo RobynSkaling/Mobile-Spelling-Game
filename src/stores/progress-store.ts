@@ -1,12 +1,18 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { GameId } from '@/features/play/logic/games';
 import { childKey, PROGRESS_SESSIONS_BASE_KEY, PROGRESS_WORD_STATS_BASE_KEY } from './child-data-logic';
 
 const MAX_STORED_SESSIONS = 50;
 
+/** What a session was played in. A Final Test also records a session, so it gets its own value. */
+export type SessionGame = GameId | 'final-test';
+
 export type SessionRecord = {
   id: string;
+  /** Absent on sessions recorded before Epic 32; reports treat those as "unknown". */
+  game?: SessionGame;
   startedAt: number;
   wordsCompleted: number;
   correctFlicks: number;
@@ -37,7 +43,7 @@ interface ProgressState {
   loadedChildId: string | null;
   isHydrated: boolean;
   loadForChild: (childId: string | null) => Promise<void>;
-  startSession: () => void;
+  startSession: (game: SessionGame) => void;
   recordCorrectFlick: () => void;
   recordMissedFlick: (word: string) => void;
   recordWordCompleted: (word: string) => void;
@@ -71,10 +77,11 @@ export const useProgressStore = create<ProgressState>((set, get) => ({
     });
   },
 
-  startSession: () => {
+  startSession: (game) => {
     const id = `session-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     const newSession: SessionRecord = {
       id,
+      game,
       startedAt: Date.now(),
       wordsCompleted: 0,
       correctFlicks: 0,

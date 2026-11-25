@@ -738,7 +738,7 @@ export function BeeLineScreen() {
   };
 
   useEffect(() => {
-    startSession();
+    startSession('bee-line');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

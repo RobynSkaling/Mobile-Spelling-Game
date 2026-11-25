@@ -235,7 +235,7 @@ export function PlayScreen() {
     });
 
   useEffect(() => {
-    startSession();
+    startSession('honey-pot-flick');
     pickSessionVillain(gameMode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
