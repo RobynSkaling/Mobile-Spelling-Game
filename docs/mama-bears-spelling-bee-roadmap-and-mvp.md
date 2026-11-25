@@ -1803,6 +1803,45 @@ As a parent of two children, I want each child's words, streak, and stickers kep
 
 Epic 30.
 
+#### Revised: Implemented
+
+All acceptance criteria are met in the web build. No real-device test was done; verification was unit tests plus headless Chrome against the web export.
+
+What landed:
+
+- **Per-child keys (`src/stores/child-data-logic.ts`, pure, unit-tested):**
+  - `childKey(base, childId)` gives `<base>.child.<id>`. Daily rewards keep the existing `dailyRewardsKey(childId)` seam (`dailyRewards.v1.profile.<id>`).
+  - `childDataKeys(childId)` lists every key a child owns, and is what removal deletes. It never contains shared keys (`word-lists.custom`, `family.v1`).
+- **Stores:** `progress-store`, `daily-rewards-store`, `game-mode-store`, `game-selection-store` and the selected-list part of `word-list-store` now each hold a `loadedChildId` and expose `loadForChild(childId)` (`loadSelectedForChild` for lists). Every write goes to the loaded child's key. Custom word lists stay shared by the family.
+- **Switching with no restart (`src/stores/per-child-data.ts`):** `startAppData()` runs once from `app/_layout.tsx`: family, shared lists, migration, then the active child's data. It then subscribes to `activeChildId`, so switching, removing the active child, and adding the first child all reload the per-child stores at once. A reload first resets the stores synchronously, so the previous child's data is never visible or written under the new child. A stale async load for an earlier child is discarded (tested).
+- **Final Test results (`final-test-store.ts`, `final-test-results-logic.ts`):** each finished test records date, list id and name, per-word result, pass/fail and score under `finalTests.child.<id>`, newest first, capped at 100. Recorded from `FinalTestScreen`. Epic 32 reads it.
+- **Removing a child:** `family-store.removeChild` deletes that child's keys after the family change is committed, so a removed active child has already been swapped out of the stores.
+- **Parent View:** shows "How {name} is doing" for the active child in all cases. The "Everyone's practice on this device" text is gone. No child switcher (Epic 32).
+
+Migration design:
+
+- **Pure planner** `planPerChildMigration`: current stored values plus the child ids in, a list of writes, a marker write and a list of deletes out. The executor (`migratePerChildData`) applies them in that order, so a kill at any point loses nothing.
+- **Target:** the first child in the family. For a legacy install that is the old profile's id; Epic 30 kept it.
+- **Moved keys:** `progress.sessions`, `progress.wordStats`, `dailyRewards.v1`, `game-mode`, `selected-game`, `word-lists.selectedId`.
+- **Versioned:** `perChildData.migratedVersion` is written after the new keys. Once it is set, data is never copied again, only leftover legacy keys from an interrupted cleanup are deleted. This stops a removed first child's data from being resurrected.
+- **Safe to re-run:** a write never overwrites a per-child key that already exists.
+- **Legacy `profile` key:** deleted only when `family.v1` is confirmed in storage.
+- **Fresh install:** with no children, nothing happens. With a first child and no legacy data, only the marker is written.
+
+Judgment calls:
+
+- A selected list that no longer exists, or a child with none, still gets a random built-in list, as before. A newly added child therefore starts with their own random list, Honey Pot Flick, and Easy.
+- Writes made while no child is loaded (before setup) are dropped rather than stored under a made-up key.
+- The marker is its own key rather than a field in `family.v1`, so the family blob's schema is untouched.
+
+Verification:
+
+- `npm test`: 231 passing (214 before; 17 new across `child-data-logic.test.ts`, `final-test-results-logic.test.ts` and `per-child-data.test.ts`). The last file runs the real stores over an in-memory `localStorage`, including "playing as child A leaves child B untouched", "removing a child deletes only their keys" and the migration end to end.
+- `npx tsc --noEmit` clean. `npx expo export --platform web` builds. `npm run smoke:layout` passes (it seeds a legacy profile, so it goes through migration).
+- Headless Chrome end to end (28 checks, no page errors): two children with separate streak, stickers, mode and progress; switching on Home updates the streak badge, album and mode with no reload; a Final Test as one child is stored under that child only and the other child's keys are byte-for-byte unchanged; removing a child deletes only their keys and keeps the shared lists; a legacy single-profile install keeps its progress, streak, stickers, mode, game and list under the first child, loses the old keys and the `profile` key, and a second launch changes nothing.
+
+Not met or left out: nothing in the acceptance criteria. Not done: real-device testing, and any UI for Final Test history (Epic 32).
+
 ---
 
 ### Epic 32 — Parent Reports Per Child
